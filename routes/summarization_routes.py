@@ -3,13 +3,13 @@ from flask import Blueprint, request, jsonify
 from services.summarization import IntelligentLegalPipeline
 
 # 1. إنشاء Blueprint
-legal_bp = Blueprint('legal_bp', __name__)
+legal_summarization = Blueprint('legal_summarization', __name__)
 
 # 2. تهيئة الـ Pipeline
 pipeline = IntelligentLegalPipeline()
 
 # 3. تعريف الـ Endpoints
-@legal_bp.route('/summarize', methods=['POST'])
+@legal_summarization.route('/summarize', methods=['POST'])
 def analyze_case():
     data = request.get_json()
     if not data or 'text' not in data:

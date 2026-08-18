@@ -202,29 +202,3 @@ class IntelligentLegalPipeline:
         }
 
 
-
-# sample
-# from legal_summarizer import IntelligentLegalPipeline
-
-# # تعريف الموديل مرة واحدة عند تشغيل السيرفر لتوفير الموارد
-# pipeline = IntelligentLegalPipeline()
-
-# def process_case_text(case_text: str):
-#     # تمرير النص والحصول على النتيجة كقاموس (Dictionary)
-#     result = pipeline.analyze(case_text)
-    
-#     if result["status"] == "success":
-#         # يمكنك استرجاع الملخص مباشرة هكذا:
-#         summary_text = result["summary"]
-#         fields = result["structured_fields"]
-        
-#         return {
-#             "summary": summary_text,
-#             "extracted_data": fields
-#         }
-#     else:
-#         return {"error": result["error"]}
-
-# # مثال للتجربة:
-# sample_text = "بتاريخ 20/05/2023، ورد إخبار إلى قسم الشرطة يفيد بوقوع مشاجرة... قرر القاضي توقيف المتهمين."
-# print(process_case_text(sample_text))

@@ -12,14 +12,8 @@ from rank_bm25 import BM25Okapi
 
 EMBEDDING_MODEL = "BAAI/bge-m3"
 RERANKER_MODEL  = "BAAI/bge-reranker-v2-m3"
+BASE_DIR = '/content/drive/MyDrive/Graduation_Project/Ijtihad Rag'
 
-# مجلد ملفات الفهرس المبنية مسبقاً — عدّل المسار الافتراضي أو استخدم متغير البيئة
-# الافتراضي هنا يفترض أن هذا الملف موجود في project_root/services/legal_search.py
-# وأن ملفات الفهرس موجودة في project_root/utils/ (كما هو الحال في مشروعك)
-BASE_DIR = os.environ.get(
-    "LEGAL_RAG_DATA_DIR",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "utils"),
-)
 
 ARTICLE_INDEX_FILE    = os.path.join(BASE_DIR, "legal_articles_index.faiss")
 ARTICLE_METADATA_FILE = os.path.join(BASE_DIR, "legal_articles_metadata.pkl")
@@ -27,10 +21,10 @@ JURIS_INDEX_FILE      = os.path.join(BASE_DIR, "legal_jurisprudence_index.faiss"
 JURIS_METADATA_FILE   = os.path.join(BASE_DIR, "legal_jurisprudence_metadata.pkl")
 
 TOP_K        = 3    # عدد النتائج المُعادة لكل نوع (مواد / اجتهادات)
-HYBRID_TOP_K = 20    # عدد المرشحين الأوليين قبل إعادة الترتيب
+HYBRID_TOP_K = 10    # عدد المرشحين الأوليين قبل إعادة الترتيب
 
-ARTICLE_THRESHOLD = 0.50  # عتبة التشابه للمواد القانونية
-JURIS_THRESHOLD   = 0.50  # عتبة التشابه للاجتهادات القضائية
+ARTICLE_THRESHOLD = 0.60  # عتبة التشابه للمواد القانونية
+JURIS_THRESHOLD   = 0.60  # عتبة التشابه للاجتهادات القضائية
 
 # كلمات مفتاحية لتحديد نية المستخدم — بدون أي LLM
 JURIS_KEYWORDS = [
@@ -189,6 +183,7 @@ class LegalRAG:
     def _rank_candidates(self, query_text: str, candidates: List[Dict],
                           text_builder: Callable[[Dict], str], threshold: float,
                           top_k: int, mapper: Callable[[Dict, float], Dict]) -> List[Dict]:
+        """يعيد ترتيب مرشحين بواسطة الـ CrossEncoder، يستبعد ما دون العتبة، ويقتصر على top_k"""
         if not candidates:
             return []
 
@@ -199,10 +194,14 @@ class LegalRAG:
 
         ranked = []
         for i, score in enumerate(scores):
-            normalized = round((1 / (1 + np.exp(-score))) * 100, 1)
-            if normalized < threshold * 100:
-                continue
-            ranked.append(mapper(candidates[i], normalized))
+            # حساب نسبة الـ Sigmoid
+          prob = float(1 / (1 + np.exp(-score)))  # Cast to native float
+
+          if prob <= threshold:
+              continue
+
+          normalized = round(float(prob * 100), 2)  # Clean 2-decimal float
+          ranked.append(mapper(candidates[i], normalized))
 
         ranked.sort(key=lambda x: x["similarity_score"], reverse=True)
         return ranked[:top_k]
