@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from services.summarization import IntelligentLegalPipeline
 from routes.summarization_routes import summarization
-from routes.leagl_jurisprudence_search_routes import legal_search_bp
+from routes.law_and_jurisprudence_search_routes import legal_search_bp
 
 app = Flask(__name__)
 CORS(app)  

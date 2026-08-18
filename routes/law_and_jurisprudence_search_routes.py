@@ -1,6 +1,6 @@
 # routes/legal_search_routes.py
 from flask import Blueprint, request, jsonify
-from services.legal_search import search_legal, warmup
+from services.law_and_jurisprudence_search import search_legal, warmup
 
 # 1. إنشاء Blueprint
 legal_search_bp = Blueprint('legal_search_bp', __name__)
