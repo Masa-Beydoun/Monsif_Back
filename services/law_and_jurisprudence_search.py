@@ -20,13 +20,12 @@ ARTICLE_METADATA_FILE = os.path.join(BASE_DIR, "legal_articles_metadata.pkl")
 JURIS_INDEX_FILE      = os.path.join(BASE_DIR, "legal_jurisprudence_index.faiss")
 JURIS_METADATA_FILE   = os.path.join(BASE_DIR, "legal_jurisprudence_metadata.pkl")
 
-TOP_K        = 3    # عدد النتائج المُعادة لكل نوع (مواد / اجتهادات)
-HYBRID_TOP_K = 10    # عدد المرشحين الأوليين قبل إعادة الترتيب
+TOP_K        = 3    
+HYBRID_TOP_K = 10    
 
-ARTICLE_THRESHOLD = 0.60  # عتبة التشابه للمواد القانونية
-JURIS_THRESHOLD   = 0.60  # عتبة التشابه للاجتهادات القضائية
+ARTICLE_THRESHOLD = 0.60  
+JURIS_THRESHOLD   = 0.60  
 
-# كلمات مفتاحية لتحديد نية المستخدم — بدون أي LLM
 JURIS_KEYWORDS = [
     "اجتهاد", "الاجتهاد", "اجتهادات", "الاجتهادات",
     "سابقة قضائية", "سوابق قضائية",
@@ -154,10 +153,6 @@ class LegalVectorStore:
 # ══════════════════════════════════════ RAG الرئيسي ══════════════════════════════════════
 
 class LegalRAG:
-    """
-    يحمّل نماذج الـ Embedding/Re-ranker والفهارس المبنية مسبقاً،
-    ويوفر query() الذي يوجّه الاستعلام تلقائياً إلى فهرس المواد و/أو فهرس الاجتهادات.
-    """
 
     def __init__(self):
         print(f" تحميل نموذج الـ Embedding: {EMBEDDING_MODEL}")
@@ -194,13 +189,12 @@ class LegalRAG:
 
         ranked = []
         for i, score in enumerate(scores):
-            # حساب نسبة الـ Sigmoid
-          prob = float(1 / (1 + np.exp(-score)))  # Cast to native float
+          prob = float(1 / (1 + np.exp(-score)))  
 
           if prob <= threshold:
               continue
 
-          normalized = round(float(prob * 100), 2)  # Clean 2-decimal float
+          normalized = round(float(prob * 100), 2) 
           ranked.append(mapper(candidates[i], normalized))
 
         ranked.sort(key=lambda x: x["similarity_score"], reverse=True)
@@ -230,10 +224,7 @@ class LegalRAG:
         }
 
     def query(self, query_text: str, top_k: int = TOP_K, mode: Optional[str] = None) -> Dict:
-        """
-        mode: 'articles' | 'jurisprudence' | 'both' | None (اكتشاف تلقائي من نص الاستعلام)
-        يعيد قاموساً جاهزاً للتحويل إلى JSON — بدون أي HTML وبدون أي LLM.
-        """
+
         if not self._ready:
             raise RuntimeError("الفهارس غير محمّلة بعد. استدعِ load_index() أولاً (أو استخدم search_legal()).")
 
@@ -274,10 +265,7 @@ _rag_instance: Optional[LegalRAG] = None
 
 
 def warmup() -> None:
-    """
-    حمّل النماذج والفهارس مرة واحدة. استدعِها عند إقلاع السيرفر (startup event)
-    كي لا يتحمّل أول مستخدم تأخير تحميل النماذج.
-    """
+
     global _rag_instance
     if _rag_instance is None:
         _rag_instance = LegalRAG()
@@ -285,7 +273,6 @@ def warmup() -> None:
 
 
 def get_rag() -> LegalRAG:
-    """يعيد نسخة الـ RAG الجاهزة (Singleton)، ويحمّلها عند أول استخدام إن لم تُستدعَ warmup() مسبقاً."""
     global _rag_instance
     if _rag_instance is None:
         warmup()

@@ -2,13 +2,10 @@
 from flask import Blueprint, request, jsonify
 from services.summarization import IntelligentLegalPipeline
 
-# 1. إنشاء Blueprint
 legal_summarization = Blueprint('legal_summarization', __name__)
 
-# 2. تهيئة الـ Pipeline
 pipeline = IntelligentLegalPipeline()
 
-# 3. تعريف الـ Endpoints
 @legal_summarization.route('/summarize', methods=['POST'])
 def analyze_case():
     data = request.get_json()

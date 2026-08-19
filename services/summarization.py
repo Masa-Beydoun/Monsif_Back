@@ -3,7 +3,6 @@ import numpy as np
 import networkx as nx
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-# محاولة استدعاء المكتبات الاختيارية[cite: 1]
 try:
     import pyarabic.araby as araby
     HAS_PYARABIC = True
@@ -26,7 +25,6 @@ try:
 except ImportError:
     HAS_NLTK_STOPWORDS = False
 
-# الثوابت والقوائم[cite: 1]
 LEGAL_STOPWORDS = {
     "محكمة", "المحكمة", "قرار", "رقم", "تاريخ", "القاضي",
     "باسم", "الشعب", "العربي", "السوري", "قانون", "مادة",

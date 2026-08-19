@@ -2,17 +2,13 @@
 from flask import Blueprint, request, jsonify
 from services.law_and_jurisprudence_search import search_legal, warmup
 
-# 1. إنشاء Blueprint
 legal_search_bp = Blueprint('legal_search_bp', __name__)
 
-# 2. تحميل نماذج الـ Embedding/Re-ranker والفهارس مرة واحدة عند إقلاع السيرفر
-#    (وليس عند كل طلب — هذا هو نفس مبدأ تهيئة pipeline في legal_routes.py)
 warmup()
 
 VALID_MODES = (None, 'articles', 'jurisprudence', 'both')
 
 
-# 3. تعريف الـ Endpoint
 @legal_search_bp.route('/search', methods=['POST'])
 def search_case():
     data = request.get_json()
@@ -30,7 +26,7 @@ def search_case():
         }), 400
 
     top_k = data.get('top_k', 3)
-    mode = data.get('mode')  # اختياري: 'articles' | 'jurisprudence' | 'both' | None (اكتشاف تلقائي)
+    mode = data.get('mode')  
 
     if mode not in VALID_MODES:
         return jsonify({
