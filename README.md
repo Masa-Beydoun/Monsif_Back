@@ -1,6 +1,6 @@
 # Monsif_Back — الواجهة الخلفية للنظام القضائي الذكي
 
-Flask API فيه أربع ميزات مستقلة، كل وحدة قابلة للاستدعاء لحالها:
+Flask API فيه ميزات مستقلة، كل وحدة قابلة للاستدعاء لحالها:
 
 | الميزة | المسار | المصدر |
 |---|---|---|
@@ -9,6 +9,7 @@ Flask API فيه أربع ميزات مستقلة، كل وحدة قابلة ل�
 | **RAG المواد القانونية** | `POST /api/legal/laws/search` | `predection.ipynb` — Part A |
 | **RAG السوابق القضائية** | `POST /api/legal/cases/search` | `predection.ipynb` — Part B |
 | **إصدار حكم أولي** | `POST /api/legal/judgment/predict` | `predection.ipynb` — Part C (v3) |
+| **RAG نماذج العقود** | `POST /api/legal/contracts/search` | `contract_RAG.ipynb` — Part D |
 
 ميزة الحكم الأولي **بتستدعي الميزتين التانتين داخلياً** — بتجمع المواد + السوابق
 كسياق، وبتمرّرهن للـ LLM، وبعدين بتتحقق إنو كل استشهاد موجود فعلاً بالسياق.
@@ -27,6 +28,7 @@ routes/                   طبقة HTTP رفيعة — تحقق من المدخ�
   laws_rag_routes.py          POST /laws/search   · GET /laws/config
   cases_rag_routes.py         POST /cases/search  · GET /cases/config
   judgment_routes.py          POST /judgment/predict · GET /judgment/config
+  contracts_routes.py         POST /contracts/search · POST /contracts/get
 
 services/                 كل المنطق — بدون أي استيراد لـ Flask
   model_registry.py       ★ نماذج مشتركة، تحميل كسول (أهم ملف للسرعة)
@@ -35,11 +37,13 @@ services/                 كل المنطق — بدون أي استيراد ل�
   laws_rag.py             Part A — hybrid → RRF → rerank → دمج المواد المرتبطة
   cases_rag.py            Part B — FAISS + BM25 → RRF → rerank → عتبة
   judgment.py             Part C — بيعتمد على laws_rag و cases_rag
+  contracts_rag.py        Part D — FAISS cosine → مرشحين → اقتراح LLM
 
 scripts/
   download_models.py      تنزيل أوزان النماذج مسبقاً (مع إعادة محاولة تلقائية)
   build_laws_index.py     ★ بناء فهرس Qdrant — مرة وحدة بس
   build_cases_index.py    بناء فهرس القضايا — مرة وحدة (فيه فهرس جاهز أصلاً)
+  build_contracts_index.py  بناء فهرس نماذج العقود — مرة وحدة
   smoke_test.py           اختبار كل المسارات (بده السيرفر شغّال)
   test_judgment_logic.py  اختبار منطق التحقق — بثانية، بدون نماذج ولا LLM
 
@@ -50,6 +54,9 @@ data/
   cases/legal_metadata_hybrid.pkl
   cases/standard_cases.json        المصدر (للبناء من الصفر)
   classifier/                      ← انسخي ملفات joblib هون (اختياري)
+  contracts/hammurabi_templates_flat.json   ← انسخي ملف النماذج هون
+  contracts/contracts.faiss        ← بينبنى بالسكربت
+  contracts/contracts_meta.pkl
 
 utils/                    فهارس النظام القديم (.faiss / .pkl)
 ```
@@ -74,6 +81,9 @@ cp .env.example .env
 
 # 4) بناء فهرس المواد القانونية — مرة وحدة، وبعدها ما بتعيديه أبداً
 ./venv/Scripts/python.exe scripts/build_laws_index.py
+
+# 5) (لميزة العقود) حطّي hammurabi_templates_flat.json بـ data/contracts/ وابني الفهرس
+./venv/Scripts/python.exe scripts/build_contracts_index.py
 ```
 
 **الخطوة 3** بتنزّل BGE-M3 (2.27GB) والـ reranker (2.27GB) للكاش المحلي
@@ -139,6 +149,7 @@ WARMUP=laws,cases
 curl http://127.0.0.1:5000/api/legal/laws/config
 curl http://127.0.0.1:5000/api/legal/cases/config
 curl http://127.0.0.1:5000/api/legal/judgment/config
+curl http://127.0.0.1:5000/api/legal/contracts/config
 ```
 
 ### RAG المواد القانونية — `POST /api/legal/laws/search`
@@ -180,6 +191,37 @@ curl http://127.0.0.1:5000/api/legal/judgment/config
 
 طفّي `use_fact_reorganization` و `use_statute_discrimination` إذا بدك ردّ أسرع —
 بيوفّروا حتى 4 استدعاءات LLM.
+
+---
+
+### RAG نماذج العقود — `POST /api/legal/contracts/search`
+
+| بارامتر | افتراضي | شو بيعمل |
+|---|---|---|
+| `top_k` | 5 | كم نموذج عقد يرجع بقائمة المرشحين |
+| `min_score` | 0.0 | عتبة cosine 0.0–1.0. النوتبوك ما كان فيه عتبة |
+| `suggest` | true | طبقة الـ LLM يلي بتقترح الأنسب — **استدعاء Groq واحد**. طفّيها لبحث دلالي صرف |
+| `groq_model` | `qwen/qwen3.6-27b` | موديل Groq للاقتراح |
+
+الميزة خطوتين، متل الحلقة التفاعلية بالنوتبوك:
+
+```bash
+# 1) البحث — بيرجع مرشحين + اقتراح الأنسب
+curl -X POST http://127.0.0.1:5000/api/legal/contracts/search   -H "Content-Type: application/json"   -d '{"text": "بدي عقد ايجار محل تجاري", "top_k": 5}'
+
+# 2) عرض العقد كامل بعد ما يختار المستخدم
+curl -X POST http://127.0.0.1:5000/api/legal/contracts/get   -H "Content-Type: application/json"   -d '{"doc_id": "..."}'
+```
+
+الاقتراح **ما بيختار عن المستخدم** — بيرجع `suggestion.choice` و `reason` بس،
+والاختيار النهائي بيصير بالخطوة التانية. إذا الموديل ما لقى مرشح مناسب بيرجع
+`choice: null`. إذا `GROQ_API_KEY` مش مضبوط، استعملي `"suggest": false`.
+
+**فروقات عن النوتبوك:** الاقتراح صار عبر Groq بدل تحميل Qwen2.5-7B محلياً،
+ونموذج الـ embedding صار BGE-M3 (نفس نموذج باقي المشروع، من `model_registry`)
+بدل `multilingual-e5-large` — حتى ما نحمّل نموذج تالت بالذاكرة. لو بدك نموذج
+النوتبوك بالضبط: `CONTRACTS_EMBEDDING_MODEL=intfloat/multilingual-e5-large`
+بملف `.env` ثم `python scripts/build_contracts_index.py --force`.
 
 ---
 

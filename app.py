@@ -6,6 +6,7 @@ from routes.cases_rag_routes import cases_rag_bp
 from routes.judgment_routes import judgment_bp
 from routes.law_and_jurisprudence_search_routes import legal_search_bp
 from routes.classification_routes import classification_bp
+from routes.contracts_routes import contracts_bp
 from routes.laws_rag_routes import laws_rag_bp
 from routes.summarization_routes import legal_summarization
 from services import model_registry
@@ -20,6 +21,7 @@ app.register_blueprint(legal_search_bp, url_prefix="/api/legal")  # /search
 app.register_blueprint(laws_rag_bp, url_prefix="/api/legal")  # /laws/search
 app.register_blueprint(cases_rag_bp, url_prefix="/api/legal")  # /cases/search
 app.register_blueprint(judgment_bp, url_prefix="/api/legal")  # /judgment/predict
+app.register_blueprint(contracts_bp, url_prefix="/api/legal")  # /contracts/search
 
 app.register_blueprint(classification_bp, url_prefix="/api/legal")
 
@@ -35,6 +37,8 @@ def home():
                 "POST /api/legal/laws/search": "RAG المواد القانونية",
                 "POST /api/legal/cases/search": "RAG السوابق القضائية",
                 "POST /api/legal/judgment/predict": "إصدار حكم أولي (يعتمد على الاتنين فوق)",
+                "POST /api/legal/contracts/search": "RAG نماذج العقود + اقتراح الأنسب",
+                "POST /api/legal/contracts/get": "عرض نموذج عقد كامل بالـ doc_id",
                 "GET  /api/health": "حالة النماذج المحمّلة",
             },
         }
@@ -44,7 +48,7 @@ def home():
 @app.route("/api/health")
 def health():
     """شو محمّل هلق — مفيد لتعرفي إذا أول طلب رح يكون بطيء."""
-    from services import cases_rag, laws_rag
+    from services import cases_rag, contracts_rag, laws_rag
 
     return jsonify(
         {
@@ -53,6 +57,7 @@ def health():
             "features": {
                 "laws_rag_loaded": laws_rag.is_loaded(),
                 "cases_rag_loaded": cases_rag.is_loaded(),
+                "contracts_rag_loaded": contracts_rag.is_loaded(),
             },
             "warmup_on_start": config.WARMUP,
         }
@@ -80,6 +85,10 @@ def _warmup() -> None:
                 from services import cases_rag
 
                 cases_rag.warmup()
+            elif feature == "contracts":
+                from services import contracts_rag
+
+                contracts_rag.warmup()
             elif feature == "search":
                 from services.law_and_jurisprudence_search import warmup
 

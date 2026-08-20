@@ -37,6 +37,9 @@ TESTS = [
      {"text": FACTS, "top_k": 3, "hybrid_top_k": 10}),
     ("search", "POST", "/api/legal/search", {"text": "السرقة الموصوفة", "top_k": 2}),
     ("judgment", "POST", "/api/legal/judgment/predict", {"text": FACTS}),
+    # suggest=false حتى الاختبار السريع ما يستهلك حصة Groq
+    ("contracts", "POST", "/api/legal/contracts/search",
+     {"text": "بدي عقد إيجار محل تجاري", "top_k": 3, "suggest": False}),
 ]
 
 
@@ -76,6 +79,12 @@ def summarize(name: str, payload: dict) -> str:
             if key in d:
                 parts.append(f"{key}={len(d[key].get('results', []))}")
         return " ".join(parts) or "—"
+    if name == "contracts":
+        n = d.get("count", 0)
+        top = d.get("results", [{}])[0] if d.get("results") else {}
+        sug = (d.get("suggestion") or {}).get("subject") or "—"
+        return (f"{n} مرشح | الأول: {top.get('subject', '—')} ({top.get('score', '—')}) "
+                f"| اقتراح: {sug} | {d.get('took_ms')}ms")
     if name == "judgment":
         v = d.get("_verification", {})
         return (f"outcome={d.get('outcome')} | تهم={len(d.get('candidate_charges', []))} "

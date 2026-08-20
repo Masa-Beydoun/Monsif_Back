@@ -160,6 +160,39 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 
+# ═══════════════════ Part D — RAG نماذج العقود (Contracts) ═══════════════════
+
+CONTRACTS_DIR = Path(os.getenv("CONTRACTS_DIR", DATA_DIR / "contracts"))
+CONTRACTS_SOURCE_JSON = str(os.getenv(
+    "CONTRACTS_SOURCE_JSON", CONTRACTS_DIR / "hammurabi_templates_flat.json"))
+CONTRACTS_INDEX_FILE = str(os.getenv("CONTRACTS_INDEX_FILE", CONTRACTS_DIR / "contracts.faiss"))
+CONTRACTS_METADATA_FILE = str(os.getenv(
+    "CONTRACTS_METADATA_FILE", CONTRACTS_DIR / "contracts_meta.pkl"))
+
+# النوتبوك استعمل intfloat/multilingual-e5-large. الافتراضي هون نفس نموذج باقي
+# المشروع (BGE-M3) حتى ما ننزّل ~2.2GB زيادة ولا نحمّل نموذج تاني بالذاكرة —
+# نفس السبب يلي خلانا نعمل model_registry. إذا بدك تلتزمي بنموذج النوتبوك:
+#     CONTRACTS_EMBEDDING_MODEL=intfloat/multilingual-e5-large
+# ⚠️ أي تغيير هون بيلزمه إعادة بناء الفهرس:
+#     python scripts/build_contracts_index.py --force
+CONTRACTS_EMBEDDING_MODEL = os.getenv("CONTRACTS_EMBEDDING_MODEL", EMBEDDING_MODEL)
+
+CONTRACTS_DEFAULTS = {
+    # كم نموذج عقد يرجع بقائمة المرشحين
+    "top_k": _i("CONTRACTS_TOP_K", 5),
+    # عتبة تشابه (cosine 0.0–1.0). 0.0 = بدون عتبة، متل النوتبوك
+    "min_score": _f("CONTRACTS_MIN_SCORE", 0.0),
+    # طبقة الـ LLM يلي بتقترح الأنسب من المرشحين (بتكلّف استدعاء Groq).
+    # false = بحث دلالي صرف بدون أي استدعاء LLM.
+    "suggest": _b("CONTRACTS_SUGGEST", True),
+    "groq_model": os.getenv("CONTRACTS_GROQ_MODEL", os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")),
+    "suggest_max_tokens": _i("CONTRACTS_SUGGEST_MAX_TOKENS", 200),
+    "temperature": _f("CONTRACTS_TEMPERATURE", 0.1),
+}
+
+CONTRACTS_BUILD_BATCH = _i("CONTRACTS_BUILD_BATCH", 16)
+
+
 # ═══════════════════════════════ إقلاع السيرفر ═══════════════════════════════
 
 # أي ميزات تُحمّل نماذجها عند الإقلاع بدل أول طلب.
