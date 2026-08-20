@@ -1,8 +1,8 @@
 """
-تنزيل أوزان النماذج مرة وحدة إلى الكاش المحلي (.hf_cache).
+تنزيل أوزان النماذج مرة واحدة إلى الكاش المحلي (.hf_cache).
 
-ليش سكربت مستقل: التنزيل ~2.5GB وممكن ينقطع بنص الطريق. هون منعيد المحاولة
-تلقائياً، والتنزيل بيكمّل من وين وقف (resume) مش من الصفر.
+حجم التنزيل نحو 2.5GB وقد ينقطع، لذلك تُعاد المحاولة تلقائياً ويُستأنف التنزيل
+من موضع الانقطاع لا من البداية.
 
     python scripts/download_models.py
     python scripts/download_models.py --retries 20
@@ -26,18 +26,18 @@ def fetch(repo_id: str, retries: int, wait: int) -> bool:
             print(f"  محاولة {attempt}/{retries} ...", flush=True)
             path = snapshot_download(
                 repo_id=repo_id,
-                # ملفات ما منحتاجها — بتوفّر جيجابايتات (أوزان TF/Flax/ONNX)
+                # ملفات غير مستخدمة (أوزان TF/Flax/ONNX)؛ استبعادها يوفّر مساحة كبيرة.
                 ignore_patterns=["*.h5", "*.msgpack", "*.onnx", "onnx/*", "*.ot"],
                 max_workers=4,
             )
-            print(f"  ✓ جاهز: {path}", flush=True)
+            print(f"  تم: {path}", flush=True)
             return True
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            print(f"  ✗ انقطع: {type(e).__name__}: {str(e)[:140]}", flush=True)
+            print(f"  انقطع: {type(e).__name__}: {str(e)[:140]}", flush=True)
             if attempt < retries:
-                print(f"    إعادة المحاولة بعد {wait}s (التنزيل بيكمّل من وين وقف) ...",
+                print(f"    إعادة المحاولة بعد {wait}s (يُستأنف من موضع الانقطاع) ...",
                       flush=True)
                 time.sleep(wait)
     return False
@@ -50,21 +50,21 @@ def main() -> int:
     args = ap.parse_args()
 
     print(f"الكاش: {config.HF_HOME}")
-    print("(التنزيل بيصير مرة وحدة — بعدها كل تشغيل بيقرأ من هون)\n")
+    print("(يجري التنزيل مرة واحدة، ثم يُقرأ من الكاش في كل تشغيل)\n")
 
     ok = True
     for repo in (config.EMBEDDING_MODEL, config.RERANKER_MODEL):
-        print(f"» {repo}")
+        print(f"- {repo}")
         if not fetch(repo, args.retries, args.wait):
-            print(f"  ✗ فشل تنزيل {repo} بعد {args.retries} محاولة.")
+            print(f"  فشل تنزيل {repo} بعد {args.retries} محاولة.")
             ok = False
         print()
 
     if ok:
-        print("✓ كل النماذج جاهزة محلياً.")
+        print("كل النماذج جاهزة محلياً.")
         print("  الخطوة التالية:  python scripts/build_laws_index.py")
     else:
-        print("✗ في نماذج ما نزلت. شغّلي السكربت مرة تانية — بيكمّل من وين وقف.")
+        print("تعذّر تنزيل بعض النماذج. أعد تشغيل السكربت؛ يُستأنف من موضع الانقطاع.")
     return 0 if ok else 1
 
 

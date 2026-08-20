@@ -1,13 +1,11 @@
 """
-Part A — RAG المواد القانونية (Laws RAG).
+الاسترجاع الدلالي للمواد القانونية.
 
-مأخوذ من predection.ipynb (القسم A) مع تغييرين فقط:
-  1. مراحل بناء الفهرس انفصلت لسكربت مستقل (scripts/build_laws_index.py).
-     هون منحمّل الفهرس الجاهز من القرص بس — ما منبني شي وقت التشغيل.
-  2. كل بارامتر كان ثابت بالنوتبوك صار قابل للتمرير مع كل استدعاء.
+مسار الاسترجاع: بحث هجين dense و sparse ← دمج RRF ← إعادة ترتيب ← عتبة ←
+دمج المواد المرتبطة.
 
-منطق الاسترجاع نفسه (hybrid dense+sparse → RRF → rerank → عتبة → دمج المواد
-المرتبطة) منقول حرفياً.
+يُبنى الفهرس بسكربت مستقل (scripts/build_laws_index.py)، ولا يُحمَّل هنا سوى
+الفهرس الجاهز من القرص. وكل بارامتر قابل للتمرير مع كل استدعاء.
 """
 
 import json
@@ -20,11 +18,12 @@ from typing import Dict, List, Optional
 import config
 from services import model_registry
 
+
 class IndexNotBuilt(RuntimeError):
-    """الفهرس مش مبني أو ناقص — الـ route بيحوّلها لـ 503 مع رسالة الإصلاح."""
+    """الفهرس غير مبني أو ناقص؛ يحوّلها الـ route إلى 503 مع رسالة الإصلاح."""
 
 
-# ═══════════════════════════ تطبيع النص العربي ═══════════════════════════
+# تطبيع النص العربي
 
 DIACRITICS_RE = re.compile(
     "[ؐ-ًؚ-ٰٟۖ-ۜ۟-۪ۨ-ۭ]"
@@ -55,12 +54,14 @@ def clean_scrape_artifacts(text: str) -> str:
     return t.strip()
 
 
-# ═════════════════════════════ نماذج البيانات ═════════════════════════════
+# نماذج البيانات
 
 @dataclass
 class Article:
-    """مادة قانونية موحّدة. نسخة dataclass خفيفة من الـ pydantic model يلي بالنوتبوك —
-    الملف المُدخل (articles_unified*.jsonl) أصلاً مُطبَّع، فما في داعي لإعادة التحقق."""
+    """مادة قانونية موحّدة.
+
+    الملف المُدخل (articles_unified*.jsonl) مُطبَّع مسبقاً، فلا حاجة لإعادة التحقق.
+    """
     article_id: str
     law_id: str
     law_name: str
@@ -79,14 +80,14 @@ class Article:
 
 @dataclass
 class DependencyArticle:
-    """مادة مدموجة، انسحبت لأن مادة مسترجَعة بتعتمد عليها."""
+    """مادة مدموجة، سُحبت لأن مادة مسترجَعة تعتمد عليها."""
     article_id: str
     law_name: str
     article_number: str
     status: str
     body: str
     depth: int      # 1 = تابعة مباشرة للنتيجة، 2 = تابعة لتابعة
-    via: str        # رقم المادة يلي جرّتها
+    via: str        # رقم المادة التي استدعتها
 
     def to_dict(self) -> Dict:
         return {
@@ -107,7 +108,7 @@ class SearchResult:
     dependencies: List[DependencyArticle] = field(default_factory=list)
 
     @property
-    def referenced(self):       # توافق مع الاسم القديم
+    def referenced(self):       # توافق مع التسمية السابقة
         return self.dependencies
 
     def to_dict(self) -> Dict:
@@ -141,7 +142,7 @@ def load_corpus(path=None) -> List[Article]:
                 continue
             body = clean_scrape_artifacts(str(r.get("body_raw") or r.get("body") or ""))
             if not body:
-                continue                    # عناوين أقسام / فجوات scrape — ما بتنفهرس
+                continue                    # عناوين أقسام أو فجوات استخلاص؛ لا تُفهرس
             seen.add(art_id)
             articles.append(Article(
                 article_id=art_id,
@@ -161,11 +162,13 @@ def load_corpus(path=None) -> List[Article]:
     return articles
 
 
-# ═══════════════════════ رسم بياني للمواد المرتبطة ═══════════════════════
+# رسم الارتباطات بين المواد
 
 def build_dependency_graph(articles: List[Article]) -> Dict[str, List[str]]:
-    """تحويل أرقام المواد المذكورة داخل كل مادة لـ article_id فعلية موجودة بالمجموعة.
-    بدون أي LLM — لحظي وحتمي، تماماً مثل القسم A4 بالنوتبوك."""
+    """تحويل أرقام المواد المذكورة داخل كل مادة إلى article_id فعلية في المجموعة.
+
+    لا يستعمل نموذجاً لغوياً؛ العملية لحظية وحتمية.
+    """
     num_index: Dict[tuple, str] = {}
     for a in articles:
         num_index.setdefault((a.law_id, normalize_arabic(a.article_number).strip()), a.article_id)
@@ -216,13 +219,13 @@ def build_dependency_graph(articles: List[Article]) -> Dict[str, List[str]]:
     return graph
 
 
-# ═════════════════════════════ محرك الـ RAG ═════════════════════════════
+# محرك الاسترجاع
 
 class LawsRAG:
-    """يحمّل فهرس Qdrant الجاهز + المجموعة، وبيوفّر search().
+    """يحمّل فهرس Qdrant الجاهز والمجموعة، ويوفّر search().
 
-    ⚠️ Qdrant بالوضع المحلي (embedded) بياخد قفل حصري على المجلد — عملية وحدة بس
-    بتقدر تفتحه. لهيك السيرفر لازم يشتغل بدون reloader (شوف app.py).
+    يأخذ Qdrant في الوضع المحلي (embedded) قفلاً حصرياً على المجلد، فلا تفتحه
+    إلا عملية واحدة. لذلك يعمل الخادم بلا reloader (انظر app.py).
     """
 
     def __init__(self):
@@ -248,24 +251,24 @@ class LawsRAG:
         if not os.path.exists(config.LAWS_QDRANT_PATH):
             raise IndexNotBuilt(
                 f"فهرس Qdrant غير موجود: {config.LAWS_QDRANT_PATH}\n"
-                f"شغّلي أولاً:  python scripts/build_laws_index.py"
+                f"نفّذ أولاً:  python scripts/build_laws_index.py"
             )
 
-        # Qdrant المحلي بياخد قفل حصري على المجلد. إذا فشل التحقق تحت، لازم
-        # نسكّر العميل فوراً — وإلا بيضل ماسك القفل ويمنع سكربت البناء من الاشتغال،
-        # وكل طلب جديد بيفتح عميل تاني لأن warmup() ما خلّص.
+        # يأخذ Qdrant المحلي قفلاً حصرياً على المجلد. عند فشل التحقق أدناه يجب
+        # إغلاق العميل فوراً، وإلا بقي ماسكاً للقفل فمنع سكربت البناء من العمل،
+        # وفتح كل طلب جديد عميلاً آخر لأن warmup() لم يكتمل.
         client = QdrantClient(path=config.LAWS_QDRANT_PATH)
         try:
             if not client.collection_exists(config.LAWS_COLLECTION):
                 raise IndexNotBuilt(
                     f"مجموعة «{config.LAWS_COLLECTION}» غير موجودة داخل الفهرس "
-                    f"(بناء ناقص أو منقطع). أعيدي البناء:\n"
+                    f"(بناء ناقص أو منقطع). أعد البناء:\n"
                     f"    python scripts/build_laws_index.py --force"
                 )
             n = client.count(config.LAWS_COLLECTION).count
             if n == 0:
                 raise IndexNotBuilt(
-                    "فهرس المواد القانونية فاضي (0 نقطة). أعيدي البناء:\n"
+                    "فهرس المواد القانونية فارغ (0 نقطة). أعد البناء:\n"
                     "    python scripts/build_laws_index.py --force"
                 )
         except BaseException:
@@ -279,7 +282,7 @@ class LawsRAG:
         print(f"[laws] فهرس Qdrant جاهز: {n} نقطة", flush=True)
         self._ready = True
 
-    # ───────────────────────────── دمج المواد المرتبطة ─────────────────────────────
+    # دمج المواد المرتبطة
 
     def _sort_key(self, article_id: str):
         a = self.by_id.get(article_id)
@@ -289,11 +292,11 @@ class LawsRAG:
     def collect_dependencies(self, article_id: str, exclude_repealed: bool = False,
                              max_depth: int = 2, max_total: int = 12,
                              skip_ids: frozenset = frozenset()) -> List[DependencyArticle]:
-        """مشي بالرسم البياني للخارج من مادة وحدة، breadth-first.
+        """مشي عرضي (breadth-first) في رسم الارتباطات انطلاقاً من مادة واحدة.
 
-        مرتّبة بالعمق ثم برقم المادة، منزوعة التكرار، وبدون المادة نفسها.
-        exclude_repealed بيستبعد الملغاة من النتيجة، بس المشي بيكمل *عبرها* حتى
-        ما تضيع مادة سارية واقفة وراء مادة ملغاة.
+        النتيجة مرتّبة بالعمق ثم برقم المادة، منزوعة التكرار وبلا المادة نفسها.
+        يستبعد exclude_repealed المواد الملغاة من النتيجة، لكن المشي يستمر عبرها
+        كي لا تضيع مادة سارية واقعة خلف مادة ملغاة.
         """
         if max_depth < 1 or article_id not in self.by_id:
             return []
@@ -337,7 +340,7 @@ class LawsRAG:
             )
         return results
 
-    # ───────────────────────────────── البحث ─────────────────────────────────
+    # البحث
 
     def hybrid_search(self, query: str, top_k: int = 15, exclude_repealed: bool = False):
         from qdrant_client import models
@@ -371,7 +374,7 @@ class LawsRAG:
 
     def rerank(self, query: str, points, top_n: int = 7,
                max_length: int = 512) -> List[SearchResult]:
-        """تسجيل وقص. المواد المرتبطة ما بتنمسّ هون — بتنضاف بعدين."""
+        """تسجيل النتائج وقصّها. تُضاف المواد المرتبطة في مرحلة لاحقة."""
         if not points:
             return []
         reranker = model_registry.get_reranker()
@@ -384,8 +387,8 @@ class LawsRAG:
                 for p, s in ranked]
 
     def _run_pipeline(self, query: str, p: Dict):
-        """قلب الـ RAG: (تفكيك) → هجين → إزالة تكرار → إعادة ترتيب → عتبة
-        → دمج المواد المرتبطة. نسخة وحدة بس، بيستعملها search() و search_raw()."""
+        """مسار الاسترجاع: تفكيك ← بحث هجين ← إزالة تكرار ← إعادة ترتيب ←
+        عتبة ← دمج المواد المرتبطة. يشترك فيه search() و search_raw()."""
         issues = decompose_query(query, p) if p["decompose"] else [query]
 
         seen, pooled = set(), []
@@ -410,7 +413,7 @@ class LawsRAG:
         return results, issues
 
     def _params(self, kw: Dict) -> Dict:
-        """الافتراضيات من config، وفوقها أي قيمة أرسلها الطلب."""
+        """القيم الافتراضية من config، وتعلوها أي قيمة أرسلها الطلب."""
         if not self._ready:
             raise RuntimeError("فهرس المواد القانونية غير محمّل.")
         p = dict(config.LAWS_DEFAULTS)
@@ -418,9 +421,9 @@ class LawsRAG:
         return p
 
     def search(self, query: str, **kw) -> Dict:
-        """بترجع قاموس جاهز للـ JSON response.
+        """يعيد قاموساً جاهزاً لاستجابة JSON.
 
-        كل البارامترات اختيارية وبتاخد قيمتها الافتراضية من config.LAWS_DEFAULTS.
+        جميع البارامترات اختيارية وتأخذ قيمها الافتراضية من config.LAWS_DEFAULTS.
         """
         p = self._params(kw)
         if not query or not query.strip():
@@ -441,15 +444,15 @@ class LawsRAG:
         }
 
     def search_raw(self, query: str, **kw) -> List[SearchResult]:
-        """نفس search() بس بترجع كائنات SearchResult — بيستعملها محرك الحكم الأولي."""
+        """مثل search() لكنه يعيد كائنات SearchResult؛ يستعمله محرك الحكم الأولي."""
         results, _ = self._run_pipeline(query, self._params(kw))
         return results
 
 
-# ═══════════════ تفكيك الاستعلامات الطويلة (اختياري، يحتاج Gemini) ═══════════════
+# تفكيك الاستعلامات الطويلة (اختياري، يتطلب Gemini)
 
 def decompose_query(text: str, params: Dict) -> List[str]:
-    """واقعة طويلة → مسائل قانونية منفصلة. بترجع [text] إذا ما في مفتاح."""
+    """تفكيك واقعة طويلة إلى مسائل قانونية منفصلة. يعيد [text] عند غياب المفتاح."""
     if len(text.split()) < params.get("decompose_min_words", 25) or not config.GOOGLE_API_KEY:
         return [text]
     try:
@@ -477,14 +480,14 @@ def decompose_query(text: str, params: Dict) -> List[str]:
     return [text]
 
 
-# ══════════════════════ واجهة الاستخدام من الـ Backend ══════════════════════
+# واجهة الاستخدام
 
 _instance: Optional[LawsRAG] = None
 _init_lock = threading.Lock()
 
 
 def warmup() -> None:
-    """تحميل المجموعة + الفهرس. بينستدعى تلقائياً أول طلب، أو عند الإقلاع لو WARMUP=laws."""
+    """تحميل المجموعة والفهرس. يُستدعى تلقائياً عند أول طلب، أو عند الإقلاع مع WARMUP=laws."""
     global _instance
     if _instance is None:
         with _init_lock:
@@ -501,7 +504,7 @@ def get_rag() -> LawsRAG:
 
 
 def search_laws(query: str, **kw) -> Dict:
-    """الدالة الوحيدة يلي بيحتاجها الـ route."""
+    """الدالة الوحيدة التي يحتاجها الـ route."""
     return get_rag().search(query, **kw)
 
 

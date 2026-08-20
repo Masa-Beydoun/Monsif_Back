@@ -1,23 +1,20 @@
 """
-Part C — إصدار حكم أولي (Legal Judgment Prediction) — v3 من predection.ipynb.
+إصدار الحكم الأولي (Legal Judgment Prediction).
 
-بيدمج ثلاث طبقات فوق بعض:
+يدمج ثلاث طبقات:
   1. PLJP (Wu et al., EMNLP 2023): إعادة تنظيم الوقائع لتحسين الاسترجاع.
-     نص الاسترجاع = دمج (وقائع خام + ثالوث) لا استبدال، حتى ما تضيع مفردات
-     قانونية حاسمة (مثل «سند») أثناء التلخيص.
-  2. ADAPT (Ask-Discriminate-Predict): كشف مواد متشابهة لفظياً حاضرة سوا بالسياق،
-     وطرح أسئلة تمييزية صريحة قبل قرار الحكم.
-  3. LegalReasoner-style self-verification: تحقق تناقض بين المادة المُختارة وأرقام
-     المواد المذكورة داخل تسبيب السوابق المرتبطة بنفس التهمة.
+     نص الاسترجاع دمج بين الوقائع الخام والثالوث لا استبدال لها، كي لا تضيع
+     مفردات قانونية حاسمة (مثل «سند») أثناء التلخيص.
+  2. ADAPT (Ask-Discriminate-Predict): كشف المواد المتشابهة لفظياً الحاضرة معاً
+     في السياق، وطرح أسئلة تمييزية صريحة قبل قرار الحكم.
+  3. تحقق ذاتي بأسلوب LegalReasoner: كشف التناقض بين المادة المُختارة وأرقام
+     المواد المذكورة داخل تسبيب السوابق المرتبطة بالتهمة نفسها.
 
-هالميزة **بتعتمد على** الميزتين التانتين:
+تعتمد هذه الميزة على:
     services.laws_rag   → المواد القانونية المرفقة بالسياق
     services.cases_rag  → السوابق القضائية المرفقة بالسياق
 
-التغييرات عن النوتبوك:
-  - مفتاح Groq انتقل لـ .env (كان مكتوب حرفياً بالنوتبوك — ⚠️ لازم يتلغى ويتبدّل).
-  - كل طبقة العرض HTML انحذفت — الـ route بيرجّع JSON.
-  - المصنّف الإحصائي بينطفي تلقائياً إذا ملفات joblib مش موجودة، بدل ما يرمي خطأ.
+ويُعطَّل المصنّف الإحصائي تلقائياً عند غياب ملفات joblib بدل رمي خطأ.
 """
 
 import json
@@ -33,7 +30,7 @@ import config
 from services import cases_rag, laws_rag
 
 
-# ─────────────────── تطبيع النص العربي (للاقتباسات — RAG) ───────────────────
+# تطبيع النص العربي (لمقارنة الاقتباسات)
 
 _TASHKEEL_RE = re.compile(r'[ً-ٰٟۖ-ۭ]')
 
@@ -49,7 +46,7 @@ def normalize_arabic(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip()
 
 
-# ─────── تطبيع خاص بالمصنّف (يطابق حرفياً تطبيع وقت التدريب — لا تعدّليه) ───────
+# تطبيع خاص بالمصنّف؛ يطابق حرفياً التطبيع المستخدم وقت التدريب.
 
 _CLASSIFIER_DIACRITICS_RE = re.compile(
     "ّ|َ|ً|ُ|ٌ|ِ|ٍ|ْ|ـ"
@@ -57,7 +54,7 @@ _CLASSIFIER_DIACRITICS_RE = re.compile(
 
 
 def normalize_arabic_for_classifier(text: str) -> str:
-    """⚠️ يجب أن تطابق حرفياً دالة التطبيع المستخدمة أثناء تدريب judicial_classifier.joblib."""
+    """يجب أن تطابق حرفياً دالة التطبيع المستخدمة في تدريب judicial_classifier.joblib."""
     text = str(text)
     text = re.sub("[إأآا]", "ا", text)
     text = re.sub("ى", "ي", text)
@@ -68,7 +65,7 @@ def normalize_arabic_for_classifier(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-# ═══════════════════════════════ الإعدادات ═══════════════════════════════
+# الإعدادات
 
 @dataclass
 class JudgmentConfig:
@@ -83,17 +80,17 @@ class JudgmentConfig:
     groq_model: str = "qwen/qwen3.6-27b"
     max_quote_words: int = 12
 
-    # v1 — المصنّف الإحصائي المتخصص (Domain Model)
+    # المصنّف الإحصائي المتخصص
     use_domain_classifier: bool = True
     top_k_classifier_labels: int = 5
     classifier_min_score: float = -1.0
     precedent_pool_size: int = 15
 
-    # v2 — إعادة تنظيم الوقائع قبل الاسترجاع
+    # إعادة تنظيم الوقائع قبل الاسترجاع
     use_fact_reorganization: bool = True
     show_reorganized_facts_to_llm: bool = True
 
-    # v3 — تمييز المواد المتشابهة لفظياً
+    # تمييز المواد المتشابهة لفظياً
     use_statute_discrimination: bool = True
     confusable_overlap_threshold: float = 0.15
     max_confusable_pairs: int = 3
@@ -101,7 +98,7 @@ class JudgmentConfig:
 
     @classmethod
     def from_request(cls, overrides: Optional[Dict] = None) -> "JudgmentConfig":
-        """الافتراضيات من config.py، وفوقها أي قيمة أرسلها الطلب."""
+        """القيم الافتراضية من config.py، وتعلوها أي قيمة أرسلها الطلب."""
         p = dict(config.JUDGMENT_DEFAULTS)
         if overrides:
             valid = {f for f in cls.__dataclass_fields__}
@@ -109,7 +106,7 @@ class JudgmentConfig:
         return cls(**{k: v for k, v in p.items() if k in cls.__dataclass_fields__})
 
 
-# ══════════════ المصنّف الإحصائي المتخصص: SVM هجين (كلمات + حروف) ══════════════
+# المصنّف الإحصائي المتخصص: SVM هجين (كلمات وحروف)
 
 CLASSIFIER_FILES = ("judicial_classifier.joblib", "word_vectorizer.joblib",
                     "char_vectorizer.joblib", "label_binarizer.joblib")
@@ -169,12 +166,12 @@ _classifier_lock = threading.Lock()
 
 
 def get_domain_classifier(cfg: JudgmentConfig) -> Optional[DomainCrimeClassifier]:
-    """بيرجّع None بهدوء إذا المصنّف مطفي أو ملفاته ناقصة — باقي الـ pipeline بيكمل."""
+    """يعيد None بهدوء إذا كان المصنّف معطَّلاً أو ملفاته ناقصة، ويكمل باقي المسار."""
     global _classifier_instance
     if not cfg.use_domain_classifier:
         return None
     if not classifier_available():
-        print(f"[judgment] ملفات المصنّف غير موجودة بـ {config.CLASSIFIER_DIR} — "
+        print(f"[judgment] ملفات المصنّف غير موجودة في {config.CLASSIFIER_DIR}؛ "
               f"سيُتخطّى المصنّف الإحصائي.", flush=True)
         return None
     if _classifier_instance is None:
@@ -185,7 +182,7 @@ def get_domain_classifier(cfg: JudgmentConfig) -> Optional[DomainCrimeClassifier
     return _classifier_instance
 
 
-# ═════════════════════════════ عميل الـ LLM (Groq) ═════════════════════════════
+# عميل النموذج اللغوي (Groq)
 
 class MissingAPIKey(RuntimeError):
     pass
@@ -213,27 +210,27 @@ def _chat_json(messages: List[Dict], cfg: JudgmentConfig, max_tokens: int,
             max_tokens=max_tokens, temperature=temperature,
         )
         try:
-            # يطفي وضع التفكير بموديلات Qwen3 على Groq — غير مدعوم بكل الموديلات
+            # يعطّل وضع التفكير في نماذج Qwen3؛ غير مدعوم في كل النماذج.
             response = client.chat.completions.create(reasoning_effort="none", **kwargs)
         except Exception:
             response = client.chat.completions.create(**kwargs)
 
         raw = response.choices[0].message.content
         if not raw or not raw.strip():
-            print("[judgment] ⚠️ الموديل رجّع محتوى فارغ.", flush=True)
+            print("[judgment] أعاد النموذج اللغوي محتوى فارغاً.", flush=True)
             return None
         return json.loads(raw)
     except MissingAPIKey:
         raise
     except json.JSONDecodeError as e:
-        print(f"[judgment] ⚠️ JSON غير صالح: {e}", flush=True)
+        print(f"[judgment] JSON غير صالح: {e}", flush=True)
         return None
     except Exception as e:
-        print(f"[judgment] حدث خطأ أثناء الاتصال بـ Groq: {e}", flush=True)
+        print(f"[judgment] تعذّر الاتصال بخدمة النموذج اللغوي: {e}", flush=True)
         return None
 
 
-# ══════════ إعادة تنظيم الوقائع قبل الاسترجاع (Fact Reorganization) ══════════
+# إعادة تنظيم الوقائع قبل الاسترجاع
 
 FACT_REORG_SYSTEM = """
 أنت مساعد قانوني. مهمتك إعادة صياغة وقائع قضية جزائية إلى ثلاثة عناصر بنيوية موحّدة
@@ -248,7 +245,7 @@ FACT_REORG_SYSTEM = """
 قواعد صارمة:
 - ممنوع إضافة أي معلومة أو تفصيل غير وارد صراحة بالوقائع الأصلية المرفقة.
 - إذا كان أحد العناصر غير مذكور إطلاقاً بالوقائع، اتركيه نصاً فارغاً "" ولا تخترعيه.
-- أعيدي الإجابة بصيغة JSON فقط بالحقول الثلاثة أعلاه بالضبط، بدون Markdown fences.
+- أعد الإجابة بصيغة JSON فقط بالحقول الثلاثة أعلاه بالضبط، بدون Markdown fences.
 """
 
 
@@ -261,7 +258,7 @@ def reorganize_facts(facts_input: str, cfg: JudgmentConfig) -> Dict[str, str]:
         cfg, max_tokens=cfg.fact_reorg_max_tokens, temperature=0.0,
     )
     if not isinstance(parsed, dict):
-        print("[judgment] ⚠️ تعذّرت إعادة تنظيم الوقائع — سيُستخدم النص الخام للاسترجاع.",
+        print("[judgment] تعذّرت إعادة تنظيم الوقائع؛ سيُستخدم النص الخام للاسترجاع.",
               flush=True)
         return {}
     return {
@@ -272,8 +269,10 @@ def reorganize_facts(facts_input: str, cfg: JudgmentConfig) -> Dict[str, str]:
 
 
 def build_retrieval_text(facts_input: str, reorganized: Dict[str, str]) -> str:
-    """دمج الوقائع الخام الكاملة مع ثالوث إعادة التنظيم — لا استبدال كامل، لضمان
-    بقاء كل المفردات القانونية الحاسمة (كـ«سند») حاضرة بنص الاستعلام."""
+    """دمج الوقائع الخام الكاملة مع ثالوث إعادة التنظيم، لا استبدالها.
+
+    يضمن ذلك بقاء المفردات القانونية الحاسمة (مثل «سند») حاضرة في نص الاستعلام.
+    """
     if not reorganized:
         return facts_input
     triplet = " ".join(p for p in (
@@ -284,11 +283,14 @@ def build_retrieval_text(facts_input: str, reorganized: Dict[str, str]) -> str:
     return f"{facts_input.strip()}\n\n{triplet}" if triplet.strip() else facts_input
 
 
-# ══════════ تمييز مواد متشابهة لفظياً (Confusable Statutes — ADAPT) ══════════
+# تمييز المواد المتشابهة لفظياً (ADAPT)
 
 def detect_confusable_statutes(retrieved_laws: List, cfg: JudgmentConfig) -> List[Dict]:
-    """كشف heuristic خفيف لأزواج مواد بنفس القانون قريبة لفظياً (تقاطع مفردات أول
-    40 كلمة). كافٍ لالتقاط حالات مثل 656/657 بدون نموذج تشابه دلالي كامل."""
+    """كشف تقريبي لأزواج المواد من القانون نفسه المتقاربة لفظياً.
+
+    يعتمد تقاطع مفردات أول 40 كلمة، ويكفي لالتقاط حالات مثل 656/657 دون
+    نموذج تشابه دلالي كامل.
+    """
     pairs = []
     laws = list(retrieved_laws)
     for i, a in enumerate(laws):
@@ -309,7 +311,7 @@ DISCRIMINATION_SYSTEM = """
 الوقائع، ووقائع قضية محددة. مهمتك فقط طرح أسئلة تمييزية والإجابة عليها اعتماداً
 حصراً على الوقائع المرفقة — لا تقرري التهمة النهائية هون، هاي خطوة تحضيرية فقط.
 
-أعيدي JSON فقط:
+أعد JSON فقط:
 {
   "distinguishing_questions": [
     {"question": "...", "answer_from_facts": "...", "points_to_article": "article_id أو 'غير محسوم'"}
@@ -339,14 +341,14 @@ def discriminate_confusable_statutes(facts_input: str, pair: Dict, bodies: Dict[
     return parsed
 
 
-# ═══════════════════════════ جمع السياق (Context) ═══════════════════════════
+# جمع السياق
 
 PENAL_CODE_HINTS = ["العقوبات", "قانون العقوبات"]
 
 
 def _find_article_by_number(article_number: str,
                             law_name_contains: Optional[List[str]] = None):
-    """بحث بالمجموعة الكاملة للمواد (مش بالنتائج المسترجعة) عن مادة برقم معيّن."""
+    """بحث عن مادة برقم معيّن في المجموعة الكاملة، لا في النتائج المسترجعة."""
     rag = laws_rag.get_rag()
     article_number = str(article_number).strip()
     candidates = [a for a in rag.articles if a.article_number == article_number]
@@ -359,7 +361,7 @@ def _find_article_by_number(article_number: str,
 
 
 def resolve_case_citations(case: Dict) -> List[Dict]:
-    """المواد المذكورة صراحةً داخل سابقة → نصوصها الكاملة من مجموعة المواد."""
+    """استخراج نصوص المواد المذكورة صراحةً داخل سابقة، من مجموعة المواد."""
     resolved = []
     for num in case.get("penal_code_articles") or []:
         art = _find_article_by_number(num, law_name_contains=PENAL_CODE_HINTS)
@@ -385,7 +387,7 @@ def resolve_case_citations(case: Dict) -> List[Dict]:
 
 def retrieve_precedents_per_candidate(retrieval_text: str, candidate_labels: List[str],
                                       cfg: JudgmentConfig) -> Dict[str, Dict]:
-    """لكل تسمية مرشّحة من المصنّف: أفضل سابقة بالمجموعة تحمل نفس التهمة."""
+    """أفضل سابقة في المجموعة تحمل التهمة نفسها، لكل تسمية مرشّحة من المصنّف."""
     if not candidate_labels:
         return {}
     pool = cases_rag.get_rag().query_raw(
@@ -469,7 +471,7 @@ def gather_context(facts_input: str, cfg: JudgmentConfig) -> Dict:
     }
 
 
-# ═════════════════════════════ بناء الـ Prompt ═════════════════════════════
+# بناء الـ Prompt
 
 class LegalPromptBuilder:
 
@@ -494,7 +496,7 @@ class LegalPromptBuilder:
    {max_quote_words} كلمة من نص المادة المذكورة بالضبط، يثبت الركن الذي بنيتِ عليه
    المطابقة. إذا ما قدرتِ تجدي اقتباساً حرفياً يثبت الركن، هذا مؤشر إنو التهمة لا
    تنطبق فعلياً — لا تختلقي اقتباساً تقريبياً أو بالمعنى.**
-6. أعيدي الإجابة بصيغة JSON فقط، بدون أي نص قبلها أو بعدها، وبدون Markdown fences.
+6. أعد الإجابة بصيغة JSON فقط، بدون أي نص قبلها أو بعدها، وبدون Markdown fences.
 7. إذا أُرفقت أدناه "تهم مرشحة من نموذج تصنيف إحصائي متخصص"، فاعتبريها إشارة إحصائية
    أولية مبنية على تشابه نصي سطحي فقط — لا حقيقة ملزمة.
 8. إذا أُرفق أدناه "تنظيم أولي للوقائع"، فهو نتاج خطوة آلية منفصلة لتحسين الاسترجاع فقط
@@ -509,7 +511,7 @@ class LegalPromptBuilder:
 """
 
     OUTPUT_SCHEMA_HINT = """
-أعيدي كائن JSON بالحقول التالية بالضبط:
+أعد كائن JSON بالحقول التالية بالضبط:
 {
   "facts_summary": "...",
   "candidate_charges": [
@@ -537,7 +539,7 @@ class LegalPromptBuilder:
     def _format_laws_block(self, laws: List, cited_in_cases: List[Dict]) -> str:
         lines = ["### النصوص القانونية المرفقة (من البحث المباشر عن الوقائع):"]
         for r in laws:
-            badge = " ⚠️ملغاة" if r.status == "ملغاة" else ""
+            badge = " (ملغاة)" if r.status == "ملغاة" else ""
             lines.append(f"- [article_id={r.article_id}] {r.law_name} — المادة {r.article_number}{badge}\n"
                          f"  النص: {r.body[:600]}")
         if cited_in_cases:
@@ -552,7 +554,7 @@ class LegalPromptBuilder:
             return ""
         lines = ["### تهم مرشحة من النموذج التصنيفي المتخصص (إشارة إحصائية أولية غير ملزمة):"]
         for c in candidates:
-            flag = "✓ تجاوزت عتبة القرار" if c["predicted"] else "دون العتبة (أعلى تسجيل فقط)"
+            flag = "تجاوزت عتبة القرار" if c["predicted"] else "دون العتبة (أعلى تسجيل فقط)"
             lines.append(f"- {c['label']} — score={c['score']} ({flag})")
         return "\n".join(lines)
 
@@ -611,14 +613,14 @@ class LegalPromptBuilder:
         return "\n".join(parts)
 
 
-# ══════════════════ التحقق (Grounding + تناقض السوابق) ══════════════════
+# التحقق: الإسناد وتناقض السوابق
 
 def _numbers(text: str) -> set:
     return set(re.findall(r"\d[\d,]*", text))
 
 
 def _extract_article_numbers_from_text(text: str) -> set:
-    """أرقام مواد مذكورة صراحة بنص حر (مثل «وفق أحكام المادة 656 قانون ع»)."""
+    """أرقام المواد المذكورة صراحة في نص حر (مثل «وفق أحكام المادة 656»)."""
     return set(re.findall(r"(?:المادة|مادة)\s*/?(\d+)/?", text or ""))
 
 
@@ -663,8 +665,10 @@ def verify_grounding(result: dict, context: Dict) -> Dict:
 
 
 def verify_charge_quotes(result: dict, context: Dict, cfg: JudgmentConfig) -> List[Dict]:
-    """يتحقق إنو كل supporting_quote موجود فعلاً (بعد تطبيع عربي) بمتن المادة
-    المذكورة معه — مش بس إنو article_id صحيح شكلياً."""
+    """يتحقق من وجود كل supporting_quote فعلياً في متن المادة المذكورة معه.
+
+    المقارنة تجري بعد التطبيع العربي، لا بمجرد التأكد من صحة شكل article_id.
+    """
     bodies = _bodies_by_id(context)
     flagged = []
     for charge in result.get("candidate_charges", []):
@@ -699,8 +703,8 @@ def verify_charge_quotes(result: dict, context: Dict, cfg: JudgmentConfig) -> Li
 
 
 def verify_precedent_consistency(result: dict, context: Dict) -> Dict:
-    """تحقق تناقض: هل المادة المُختارة تنعارض مع رقم المادة المذكور صراحة بنص تسبيب
-    السوابق المرتبطة بنفس التهمة المرشحة؟"""
+    """كشف التناقض بين المادة المُختارة ورقم المادة المذكور صراحة في تسبيب
+    السوابق المرتبطة بالتهمة المرشحة نفسها."""
     mismatches = []
     id_to_number = {r.article_id: r.article_number for r in context["retrieved_laws"]}
     id_to_number.update({a["article_id"]: a["article_number"] for a in context["cited_in_cases"]})
@@ -740,9 +744,10 @@ def verify_all(result: dict, context: Dict, cfg: JudgmentConfig) -> Dict:
     return id_check
 
 
-# ═════════════════════════════ الـ Pipeline الكامل ═════════════════════════════
+# المسار الكامل
 
 class LegalJudgmentPredictor:
+    """يجمع السياق، ويبني الـ prompt، ويستدعي النموذج اللغوي، ثم يتحقق من الناتج."""
 
     def __init__(self, cfg: Optional[JudgmentConfig] = None):
         self.config = cfg or JudgmentConfig()
@@ -759,7 +764,7 @@ class LegalJudgmentPredictor:
         if not isinstance(raw_result, dict):
             return {
                 "error": "parsing_error",
-                "message": "النموذج ما رجّع JSON صالح — أعيدي المحاولة أو راجعي الـ prompt.",
+                "message": "لم يُعِد النموذج اللغوي مخرجاً صالحاً. يرجى إعادة المحاولة.",
                 "retrieved_statutes": [r.to_dict() for r in context["retrieved_laws"]],
                 "retrieved_cases": context["retrieved_cases"],
             }
@@ -779,16 +784,16 @@ class LegalJudgmentPredictor:
         return raw_result
 
 
-# ══════════════════════ واجهة الاستخدام من الـ Backend ══════════════════════
+# واجهة الاستخدام
 
 def warmup() -> None:
-    """يسخّن الميزتين يلي بتعتمد عليهن. المصنّف بينحمّل كسول عند أول تنبؤ."""
+    """تحميل مسبق للميزتين اللتين تعتمد عليهما. يُحمَّل المصنّف كسولاً عند أول تنبؤ."""
     laws_rag.warmup()
     cases_rag.warmup()
 
 
 def predict_judgment(facts_input: str, overrides: Optional[Dict] = None) -> Dict:
-    """الدالة الوحيدة يلي بيحتاجها الـ route."""
+    """الدالة الوحيدة التي يحتاجها الـ route."""
     cfg = JudgmentConfig.from_request(overrides)
     result = LegalJudgmentPredictor(cfg).predict(facts_input)
     result["_config_used"] = asdict(cfg)

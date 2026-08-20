@@ -1,4 +1,4 @@
-# routes/laws_rag_routes.py — Part A: RAG المواد القانونية
+# routes/laws_rag_routes.py — الاسترجاع الدلالي للمواد القانونية
 from flask import Blueprint, jsonify, request
 
 import config
@@ -6,7 +6,7 @@ from services import laws_rag
 
 laws_rag_bp = Blueprint("laws_rag_bp", __name__)
 
-# البارامترات يلي بيقدر الطلب يتحكم فيها (أي شي غيرها بينتجاهل)
+# البارامترات المسموح تعديلها من جسم الطلب؛ ما عداها يُتجاهل.
 TUNABLE = {
     "top_n": int,
     "hybrid_top_k": int,
@@ -41,7 +41,7 @@ def search_laws():
     POST /api/legal/laws/search
     {
       "text": "السرقة الموصوفة",
-      "top_n": 7,                 // اختياري — كلهن اختياريين
+      "top_n": 7,                 // جميع البارامترات اختيارية
       "hybrid_top_k": 15,
       "exclude_repealed": true,
       "min_score": 0.3,
@@ -55,12 +55,13 @@ def search_laws():
     query_text = (data.get("text") or "").strip()
     if not query_text:
         return jsonify({"status": "error",
-                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن الـ JSON"}), 400
+                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن جسم الطلب."}), 400
 
     try:
         params = _coerce(data)
     except (TypeError, ValueError) as e:
-        return jsonify({"status": "error", "error": f"قيمة بارامتر غير صالحة: {e}"}), 400
+        return jsonify({"status": "error",
+                        "error": f"قيمة غير صالحة لأحد البارامترات: {e}"}), 400
 
     try:
         result = laws_rag.search_laws(query_text, **params)
@@ -68,12 +69,13 @@ def search_laws():
     except (laws_rag.IndexNotBuilt, FileNotFoundError) as e:
         return jsonify({"status": "error", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "error", "error": f"حدث خطأ غير متوقع: {e}"}), 500
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
 
 
 @laws_rag_bp.route("/laws/config", methods=["GET"])
 def laws_config():
-    """القيم الافتراضية الحالية + أسماء البارامترات يلي بتقدري تبعتيها بالطلب."""
+    """القيم الافتراضية الحالية وأسماء البارامترات المسموح إرسالها في الطلب."""
     return jsonify({
         "status": "success",
         "data": {

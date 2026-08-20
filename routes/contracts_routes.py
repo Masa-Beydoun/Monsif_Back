@@ -1,4 +1,4 @@
-# routes/contracts_routes.py — Part D: RAG نماذج العقود
+# routes/contracts_routes.py — الاسترجاع الدلالي لنماذج العقود
 from flask import Blueprint, jsonify, request
 
 import config
@@ -35,25 +35,26 @@ def search_contracts():
     """
     POST /api/legal/contracts/search
     {
-      "text": "بدي عقد إيجار محل تجاري",
-      "top_k": 5,          // اختياري
-      "min_score": 0.0,    // اختياري — عتبة cosine
-      "suggest": true      // اختياري — طبقة الـ LLM (بتكلّف استدعاء Groq)
+      "text": "عقد إيجار محل تجاري",
+      "top_k": 5,          // جميع البارامترات اختيارية
+      "min_score": 0.0,    // عتبة تشابه cosine
+      "suggest": true      // طبقة النموذج اللغوي (تستهلك استدعاءً واحداً)
     }
 
-    بترجع قائمة المرشحين + اقتراح الأنسب. لعرض العقد كامل، ابعتي الـ doc_id
-    يلي اختاره المستخدم لـ /api/legal/contracts/get.
+    يعيد قائمة المرشحين مع اقتراح الأنسب. لعرض النموذج كاملاً يُرسل الـ doc_id
+    المختار إلى /api/legal/contracts/get.
     """
     data = request.get_json(silent=True) or {}
     query_text = (data.get("text") or "").strip()
     if not query_text:
         return jsonify({"status": "error",
-                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن الـ JSON"}), 400
+                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن جسم الطلب."}), 400
 
     try:
         params = _coerce(data)
     except (TypeError, ValueError) as e:
-        return jsonify({"status": "error", "error": f"قيمة بارامتر غير صالحة: {e}"}), 400
+        return jsonify({"status": "error",
+                        "error": f"قيمة غير صالحة لأحد البارامترات: {e}"}), 400
 
     try:
         result = contracts_rag.search_contracts(query_text, **params)
@@ -63,7 +64,8 @@ def search_contracts():
     except FileNotFoundError as e:
         return jsonify({"status": "error", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "error", "error": f"حدث خطأ غير متوقع: {e}"}), 500
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
 
 
 @contracts_bp.route("/contracts/get", methods=["POST"])
@@ -72,40 +74,43 @@ def get_contract():
     POST /api/legal/contracts/get
     {"doc_id": "..."}          أو          {"subject": "عنوان العقد بالضبط"}
 
-    doc_id أضمن — العنوان لازمه يطابق حرفياً متل ما رجع بنتيجة البحث.
+    يُفضّل استخدام doc_id؛ أما العنوان فيجب أن يطابق نتيجة البحث حرفياً.
     """
     data = request.get_json(silent=True) or {}
     doc_id = (data.get("doc_id") or "").strip()
     subject = (data.get("subject") or "").strip()
     if not doc_id and not subject:
         return jsonify({"status": "error",
-                        "error": "يرجى إرسال 'doc_id' أو 'subject' ضمن الـ JSON"}), 400
+                        "error": "يرجى إرسال 'doc_id' أو 'subject' ضمن جسم الطلب."}), 400
 
     try:
         contract = contracts_rag.get_contract(doc_id=doc_id or None, subject=subject or None)
     except FileNotFoundError as e:
         return jsonify({"status": "error", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "error", "error": f"حدث خطأ غير متوقع: {e}"}), 500
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
 
     if contract is None:
         return jsonify({"status": "error",
-                        "error": "ما في نموذج عقد بهالمعرّف/العنوان."}), 404
+                        "error": "لم يُعثر على نموذج عقد بالمعرّف أو العنوان المحدد."}), 404
     return jsonify({"status": "success", "data": contract}), 200
 
 
 @contracts_bp.route("/contracts/<path:doc_id>", methods=["GET"])
 def get_contract_by_id(doc_id: str):
-    """نفس /contracts/get بس بـ GET — GET /api/legal/contracts/<doc_id>"""
+    """مكافئ لـ /contracts/get بأسلوب GET."""
     try:
         contract = contracts_rag.get_contract(doc_id=doc_id)
     except FileNotFoundError as e:
         return jsonify({"status": "error", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "error", "error": f"حدث خطأ غير متوقع: {e}"}), 500
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
 
     if contract is None:
-        return jsonify({"status": "error", "error": "ما في نموذج عقد بهالمعرّف."}), 404
+        return jsonify({"status": "error",
+                        "error": "لم يُعثر على نموذج عقد بالمعرّف المحدد."}), 404
     return jsonify({"status": "success", "data": contract}), 200
 
 
@@ -118,7 +123,7 @@ def contracts_config():
         "embedding_model": config.CONTRACTS_EMBEDDING_MODEL,
         "index_file": config.CONTRACTS_INDEX_FILE,
     }
-    # توزيع الفئات متوفر بس إذا الفهرس محمّل — ما منحمّله لمجرد طلب إعدادات
+    # توزيع الفئات متاح فقط إذا كان الفهرس محمّلاً؛ لا يُحمَّل لأجل طلب إعدادات.
     if contracts_rag.is_loaded():
         rag = contracts_rag.get_rag()
         data["total_contracts"] = len(rag.records)

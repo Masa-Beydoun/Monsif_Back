@@ -1,11 +1,11 @@
-# routes/legal_routes.py
-from flask import Blueprint, request, jsonify
+# routes/summarization_routes.py — تلخيص نص القضية واستخراج الحقول
+from flask import Blueprint, jsonify, request
+
 from services.summarization import IntelligentLegalPipeline
 
-# 1. إنشاء Blueprint
 legal_summarization = Blueprint('legal_summarization', __name__)
 
-# 2. تهيئة الـ Pipeline (كسولة — أول طلب بيجهّزها، وبعدين بتنعاد استخدامها)
+# تهيئة كسولة: أول طلب يجهّز الـ Pipeline ثم يُعاد استخدامها.
 _pipeline = None
 
 
@@ -15,14 +15,18 @@ def get_pipeline() -> IntelligentLegalPipeline:
         _pipeline = IntelligentLegalPipeline()
     return _pipeline
 
-# 3. تعريف الـ Endpoints
+
 @legal_summarization.route('/summarize', methods=['POST'])
 def analyze_case():
-    data = request.get_json()
+    """
+    POST /api/legal/summarize
+    {"text": "نص القضية ..."}
+    """
+    data = request.get_json(silent=True)
     if not data or 'text' not in data:
         return jsonify({
             "status": "error",
-            "error": "يرجى إرسال حقل 'text' ضمن الـ JSON"
+            "error": "يرجى إرسال حقل 'text' ضمن جسم الطلب."
         }), 400
 
     raw_text = data.get('text', '')
@@ -45,5 +49,5 @@ def analyze_case():
     except Exception as e:
         return jsonify({
             "status": "error",
-            "error": f"حدث خطأ غير متوقع: {str(e)}"
+            "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"
         }), 500

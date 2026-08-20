@@ -12,7 +12,7 @@ from routes.summarization_routes import legal_summarization
 from services import model_registry
 
 app = Flask(__name__)
-app.config["JSON_AS_ASCII"] = False  # حتى العربي يرجع مقروء مش \uXXXX
+app.config["JSON_AS_ASCII"] = False  # إرجاع النص العربي كما هو بدل \uXXXX
 app.json.ensure_ascii = False
 CORS(app)
 
@@ -47,7 +47,7 @@ def home():
 
 @app.route("/api/health")
 def health():
-    """شو محمّل هلق — مفيد لتعرفي إذا أول طلب رح يكون بطيء."""
+    """النماذج المحمّلة حالياً."""
     from services import cases_rag, contracts_rag, laws_rag
 
     return jsonify(
@@ -65,14 +65,13 @@ def health():
 
 
 def _warmup() -> None:
-    """تحميل مسبق اختياري حسب WARMUP بملف .env.
+    """تحميل مسبق اختياري وفق قيمة WARMUP في ملف .env.
 
-    فاضي (الافتراضي) = تحميل كسول: السيرفر بيقلع فوراً، وكل ميزة بتحمّل نماذجها
-    أول ما توصلها أول طلب. حطّي WARMUP=laws,cases إذا بدك أول طلب يكون سريع
-    وما بتهمك مدة الإقلاع.
+    القيمة الفارغة (الافتراضي) تعني تحميلاً كسولاً: يقلع الخادم فوراً وتُحمَّل
+    نماذج كل ميزة عند أول طلب يصلها.
     """
     if not config.WARMUP:
-        print("[app] تحميل كسول — النماذج بتنحمّل عند أول طلب لكل ميزة.", flush=True)
+        print("[app] تحميل كسول: تُحمَّل النماذج عند أول طلب لكل ميزة.", flush=True)
         return
 
     for feature in config.WARMUP:
@@ -94,13 +93,13 @@ def _warmup() -> None:
 
                 warmup()
             else:
-                print(f"[app] ميزة غير معروفة بـ WARMUP: {feature}", flush=True)
+                print(f"[app] ميزة غير معروفة في WARMUP: {feature}", flush=True)
         except Exception as e:
-            print(f"[app] ✗ فشل تسخين «{feature}»: {e}", flush=True)
+            print(f"[app] فشل التحميل المسبق لميزة «{feature}»: {e}", flush=True)
 
 
 if __name__ == "__main__":
     _warmup()
-    # ⚠️ use_reloader=False مهم: الـ reloader بيشغّل العملية مرتين، يعني كل نموذج
-    #    بينحمّل مرتين، وفهرس Qdrant المحلي بيرمي خطأ قفل (already locked).
+    # use_reloader=False ضروري: الـ reloader يشغّل العملية مرتين، فتُحمَّل النماذج
+    # مرتين ويرمي فهرس Qdrant المحلي خطأ قفل (already locked).
     app.run(debug=config.DEBUG, port=config.PORT, use_reloader=False, threaded=True)

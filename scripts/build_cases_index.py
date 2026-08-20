@@ -1,8 +1,8 @@
 """
-بناء فهرس القضايا (FAISS + BM25) من standard_cases.json — يُشغَّل **مرة وحدة**.
+بناء فهرس السوابق القضائية (FAISS و BM25) من standard_cases.json.
 
-عادةً ما بتحتاجيه: فهرس جاهز موجود أصلاً بـ data/cases/. استعمليه بس إذا
-تغيّر ملف القضايا أو بدك تعيدي البناء من الصفر.
+يوجد فهرس جاهز في data/cases/، فلا حاجة لهذا السكربت إلا عند تغيّر ملف السوابق
+أو عند إعادة البناء من الصفر.
 
     python scripts/build_cases_index.py
     python scripts/build_cases_index.py --force
@@ -20,27 +20,28 @@ from services.cases_rag import CasesRAG  # noqa: E402
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="بناء فهرس القضايا")
-    ap.add_argument("--force", action="store_true", help="أعد البناء حتى لو الفهرس موجود")
-    ap.add_argument("--json", default=config.CASES_SOURCE_JSON, help="مسار ملف القضايا JSON")
+    ap = argparse.ArgumentParser(description="بناء فهرس السوابق القضائية")
+    ap.add_argument("--force", action="store_true", help="إعادة البناء حتى مع وجود الفهرس")
+    ap.add_argument("--json", default=config.CASES_SOURCE_JSON,
+                    help="مسار ملف السوابق بصيغة JSON")
     args = ap.parse_args()
 
     exists = (os.path.exists(config.CASES_INDEX_FILE)
               and os.path.exists(config.CASES_METADATA_FILE))
     if exists and not args.force:
-        print(f"✓ الفهرس موجود أصلاً: {config.CASES_INDEX_FILE}")
-        print("  استعملي --force لإعادة البناء.")
+        print(f"الفهرس موجود مسبقاً: {config.CASES_INDEX_FILE}")
+        print("  استخدم --force لإعادة البناء.")
         return 0
 
     if not os.path.exists(args.json):
-        print(f"✗ ملف القضايا غير موجود: {args.json}")
+        print(f"ملف السوابق غير موجود: {args.json}")
         return 1
 
-    print(f"بناء فهرس القضايا من {args.json} ...")
-    print("تحميل BGE-M3 (أول مرة بينزّل ~2.3GB) ...")
+    print(f"بناء فهرس السوابق من {args.json} ...")
+    print("تحميل BGE-M3 (ينزّل نحو 2.3GB أول مرة) ...")
     rag = CasesRAG()
     rag.build_from_json(args.json, save=True)
-    print("\n✓ تم.")
+    print("\nاكتمل البناء.")
     return 0
 
 

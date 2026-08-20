@@ -1,13 +1,10 @@
 """
-مستودع نماذج مشترك — Lazy Singletons.
+مستودع النماذج المشتركة (Lazy Singletons).
 
-ليش هالملف موجود:
-  النوتبوك كان يحمّل نسخة BGE-M3 مستقلة لكل قسم، ونسخة reranker مستقلة كمان.
-  ثلاث ميزات × نموذجين = ستة تحميلات لنفس الأوزان (~2.3GB للواحد).
-  هون كل نموذج بينحمّل **مرة وحدة** وبينتشارك بين كل الميزات.
+يُحمَّل كل نموذج مرة واحدة ويُتشارك بين جميع الميزات، بدل تحميل نسخة مستقلة
+من الأوزان نفسها لكل ميزة.
 
-  وكمان: ما في شي بينحمّل عند الـ import. النموذج بينحمّل أول ما حدا يطلبه فعلياً،
-  يعني `flask run` بيرجع فوراً، وميزة ما بتستعملها ما بتكلفك ولا بايت.
+ولا يُحمَّل شيء عند الاستيراد: يُحمَّل النموذج عند أول طلب فعلي له.
 """
 
 import threading
@@ -20,21 +17,21 @@ import config
 
 _lock = threading.Lock()
 
-_dense_encoder = None       # SentenceTransformer  — dense فقط (القضايا + البحث القديم)
-_bgem3_flag = None          # BGEM3FlagModel       — dense + sparse (المواد القانونية)
-_reranker = None            # SharedReranker       — مشترك بين الكل
+_dense_encoder = None       # SentenceTransformer — متجهات dense فقط
+_bgem3_flag = None          # BGEM3FlagModel — متجهات dense و sparse
+_reranker = None            # SharedReranker — مشترك بين جميع الميزات
 
 
 def _log(msg: str) -> None:
     print(f"[models] {msg}", flush=True)
 
 
-# ══════════════════════════════ Dense encoder ══════════════════════════════
+# Dense encoder
 
 def get_dense_encoder(max_seq_length: Optional[int] = None):
     """SentenceTransformer(BGE-M3) — متجهات dense فقط.
 
-    يستعمله: RAG السوابق (Part B) + خدمة البحث القديمة.
+    تستعمله خدمة السوابق القضائية وخدمة البحث في المواد والاجتهادات.
     """
     global _dense_encoder
     if _dense_encoder is None:
@@ -52,13 +49,13 @@ def get_dense_encoder(max_seq_length: Optional[int] = None):
     return _dense_encoder
 
 
-# ═══════════════════════ BGE-M3 dense + sparse (FlagEmbedding) ═══════════════════════
+# BGE-M3 dense + sparse (FlagEmbedding)
 
 def get_bgem3_flag():
-    """BGEM3FlagModel — بيرجّع dense **و** lexical_weights (sparse).
+    """BGEM3FlagModel — يعيد متجهات dense و lexical_weights معاً.
 
-    يستعمله: RAG المواد القانونية فقط (Qdrant بده الاتنين للـ RRF).
-    SentenceTransformer ما بيقدر ينتج lexical_weights، لهيك هاد نموذج منفصل.
+    تستعمله خدمة المواد القانونية وحدها، إذ يحتاج Qdrant النوعين لدمج RRF.
+    وهو نموذج منفصل لأن SentenceTransformer لا ينتج lexical_weights.
     """
     global _bgem3_flag
     if _bgem3_flag is None:
@@ -78,17 +75,16 @@ def get_bgem3_flag():
     return _bgem3_flag
 
 
-# ═════════════════════════════════ Reranker ═════════════════════════════════
+# Reranker
 
 class SharedReranker:
-    """Cross-encoder (bge-reranker-v2-m3) واحد لكل النظام.
+    """Cross-encoder (bge-reranker-v2-m3) واحد للنظام كله.
 
-    منسوخ سلوكياً عن TransformersReranker يلي بالنوتبوك: نفس الـ checkpoint،
-    نفس التقطيع (تقصير الاستعلام لـ max_length*3//4 ثم تقصير النص)، ونفس
-    التحويل sigmoid(logit) لما normalize=True.
+    يقصّر الاستعلام إلى max_length*3//4 ثم يقصّ النص، ويحوّل الناتج بـ
+    sigmoid(logit) عند normalize=True.
 
-    الفرق الوحيد: max_length صار بارامتر لكل استدعاء بدل ما يكون مثبّت بالبناء،
-    لأن كل ميزة بالنوتبوك كانت تستعمل قيمة مختلفة (512 / 2048 / 8192).
+    max_length بارامتر لكل استدعاء لا قيمة ثابتة عند الإنشاء، لأن كل ميزة
+    تستعمل قيمة مختلفة (512 / 2048 / 8192).
     """
 
     def __init__(self, model_name: str):
@@ -123,8 +119,8 @@ class SharedReranker:
         with self._torch.no_grad():
             for start in range(0, len(sentence_pairs), bs):
                 batch = sentence_pairs[start:start + bs]
-                # تقصير الاستعلام أولاً حتى وقائع طويلة ما تاكل كل النافذة،
-                # وبعدها truncation='only_second' بتقصّ متن المادة.
+                # يُقصَّر الاستعلام أولاً كي لا تستهلك الوقائع الطويلة النافذة
+                # كلها، ثم يقصّ truncation='only_second' متن المادة.
                 queries = [
                     self.tokenizer.decode(
                         self.tokenizer(q, add_special_tokens=False, truncation=True,
@@ -141,7 +137,7 @@ class SharedReranker:
             scores = [float(1 / (1 + np.exp(-s))) for s in scores]
         return scores
 
-    # اسم بديل حتى الكود يلي متعوّد على CrossEncoder.predict يشتغل بدون تعديل
+    # اسم بديل لتوافق الكود المعتمد على CrossEncoder.predict.
     def predict(self, sentence_pairs, max_length=None, **kwargs):
         return np.array(self.compute_score(sentence_pairs, max_length=max_length))
 
@@ -155,10 +151,10 @@ def get_reranker() -> SharedReranker:
     return _reranker
 
 
-# ═════════════════════════════════ حالة النماذج ═════════════════════════════════
+# حالة النماذج
 
 def status() -> dict:
-    """شو محمّل هلق فعلياً — مفيد لـ /api/health."""
+    """النماذج المحمّلة فعلياً؛ تُستعمل في /api/health."""
     return {
         "device": config.resolve_device(),
         "fp16": config.use_fp16(),

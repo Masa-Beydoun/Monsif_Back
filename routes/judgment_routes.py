@@ -1,4 +1,4 @@
-# routes/judgment_routes.py — Part C: إصدار حكم أولي
+# routes/judgment_routes.py — إصدار الحكم الأولي
 from flask import Blueprint, jsonify, request
 
 import config
@@ -13,7 +13,7 @@ def predict():
     POST /api/legal/judgment/predict
     {
       "text": "وقائع القضية ...",
-      "config": {                     // اختياري — أي حقل من JudgmentConfig
+      "config": {                     // اختياري: أي حقل من JudgmentConfig
         "top_k_laws": 5,
         "top_k_cases": 3,
         "case_threshold": 0.45,
@@ -23,14 +23,14 @@ def predict():
       }
     }
 
-    ⚠️ هالمسار بيستدعي الـ LLM حتى 5 مرات (إعادة تنظيم + تمييز لكل زوج + الحكم)،
-    وبيشغّل الـ RAG مرتين. متوقّع ياخد وقت أطول من مسارات البحث المفردة.
+    ينفّذ هذا المسار حتى خمسة استدعاءات للنموذج اللغوي ودورتَي استرجاع،
+    لذلك يستغرق وقتاً أطول من مسارات البحث المفردة.
     """
     data = request.get_json(silent=True) or {}
     facts = (data.get("text") or "").strip()
     if not facts:
         return jsonify({"status": "error",
-                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن الـ JSON"}), 400
+                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن جسم الطلب."}), 400
     if len(facts) < 20:
         return jsonify({"status": "error",
                         "error": "نص الوقائع قصير جداً ولا يكفي لإصدار حكم أولي."}), 400
@@ -48,7 +48,8 @@ def predict():
     except (laws_rag.IndexNotBuilt, FileNotFoundError) as e:
         return jsonify({"status": "error", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "error", "error": f"حدث خطأ غير متوقع: {e}"}), 500
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
 
 
 @judgment_bp.route("/judgment/config", methods=["GET"])

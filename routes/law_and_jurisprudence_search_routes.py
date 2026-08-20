@@ -1,25 +1,30 @@
-# routes/legal_search_routes.py
-from flask import Blueprint, request, jsonify
+# routes/law_and_jurisprudence_search_routes.py — البحث في المواد والاجتهادات
+from flask import Blueprint, jsonify, request
+
 from services.law_and_jurisprudence_search import search_legal
 
-# 1. إنشاء Blueprint
 legal_search_bp = Blueprint('legal_search_bp', __name__)
 
-# 2. النماذج والفهارس بتنحمّل مرة وحدة، بس **كسول** — أول ما يوصل أول طلب لهالمسار،
-#    مش عند الـ import. هيك السيرفر بيقلع فوراً وميزة ما بتستعمليها ما بتكلفك وقت.
-#    إذا بدك تحميل مسبق عند الإقلاع: حطّي WARMUP=search بملف .env
-
+# النماذج والفهارس تُحمَّل مرة واحدة وبشكل كسول عند أول طلب على هذا المسار،
+# لا عند الاستيراد. للتحميل المسبق عند الإقلاع: WARMUP=search في ملف .env
 VALID_MODES = (None, 'articles', 'jurisprudence', 'both')
 
 
-# 3. تعريف الـ Endpoint
 @legal_search_bp.route('/search', methods=['POST'])
 def search_case():
-    data = request.get_json()
+    """
+    POST /api/legal/search
+    {
+      "text": "السرقة الموصوفة",
+      "top_k": 3,
+      "mode": "both"     // articles | jurisprudence | both | غير محدد (اكتشاف تلقائي)
+    }
+    """
+    data = request.get_json(silent=True)
     if not data or 'text' not in data:
         return jsonify({
             "status": "error",
-            "error": "يرجى إرسال حقل 'text' ضمن الـ JSON"
+            "error": "يرجى إرسال حقل 'text' ضمن جسم الطلب."
         }), 400
 
     query_text = (data.get('text') or '').strip()
@@ -30,7 +35,7 @@ def search_case():
         }), 400
 
     top_k = data.get('top_k', 3)
-    mode = data.get('mode')  # اختياري: 'articles' | 'jurisprudence' | 'both' | None (اكتشاف تلقائي)
+    mode = data.get('mode')
 
     if mode not in VALID_MODES:
         return jsonify({
@@ -49,5 +54,5 @@ def search_case():
     except Exception as e:
         return jsonify({
             "status": "error",
-            "error": f"حدث خطأ غير متوقع: {str(e)}"
+            "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"
         }), 500

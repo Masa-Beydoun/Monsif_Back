@@ -1,16 +1,15 @@
 """
-بناء فهرس Qdrant لـ RAG المواد القانونية — يُشغَّل **مرة وحدة**.
+بناء فهرس Qdrant للمواد القانونية — يُنفَّذ مرة واحدة.
 
-هاد هو الشي الغالي الوحيد بالمشروع: تحويل كل مادة قانونية لمتجه dense + sparse
-بنموذج BGE-M3. بعد ما يخلص، الفهرس بينحفظ على القرص وما بينبنى مرة تانية —
-السيرفر بس بيفتحه.
+يحوّل كل مادة قانونية إلى متجه dense و sparse بنموذج BGE-M3، وهي أثقل عملية في
+المشروع. بعد اكتمالها يُحفظ الفهرس على القرص ولا يُعاد بناؤه؛ يفتحه الخادم فقط.
 
-    python scripts/build_laws_index.py            # يبني إذا ما في فهرس
-    python scripts/build_laws_index.py --force    # يهدم ويعيد البناء
+    python scripts/build_laws_index.py            # يبني عند غياب الفهرس
+    python scripts/build_laws_index.py --force    # يحذف ويعيد البناء
     python scripts/build_laws_index.py --limit 50 # تجربة سريعة على 50 مادة
 
-⚠️ لازم يكون السيرفر **مطفي** وقت التشغيل: Qdrant المحلي بياخد قفل حصري
-   على مجلد الفهرس، وعمليتين ما بيقدروا يفتحوه سوا.
+يجب أن يكون الخادم متوقفاً أثناء التنفيذ: يأخذ Qdrant المحلي قفلاً حصرياً على
+مجلد الفهرس، فلا تفتحه عمليتان معاً.
 """
 
 import argparse
@@ -29,7 +28,7 @@ from services import laws_rag, model_registry  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="بناء فهرس Qdrant للمواد القانونية")
-    ap.add_argument("--force", action="store_true", help="احذف الفهرس الموجود وأعد البناء")
+    ap.add_argument("--force", action="store_true", help="حذف الفهرس الموجود وإعادة البناء")
     ap.add_argument("--limit", type=int, default=0, help="ابنِ أول N مادة فقط (للتجربة)")
     ap.add_argument("--batch", type=int, default=config.LAWS_BUILD_BATCH,
                     help=f"حجم دفعة الترميز (افتراضي {config.LAWS_BUILD_BATCH})")
@@ -46,9 +45,9 @@ def main() -> int:
         print(f"--force → حذف الفهرس الموجود: {qdrant_path}")
         shutil.rmtree(qdrant_path)
 
-    # ── 1) تحميل المجموعة ──────────────────────────────────────────────────
+    # تحميل المجموعة
     if not config.LAWS_CORPUS_FILE.exists():
-        print(f"✗ ملف المجموعة غير موجود: {config.LAWS_CORPUS_FILE}")
+        print(f"ملف المجموعة غير موجود: {config.LAWS_CORPUS_FILE}")
         return 1
 
     print(f"قراءة المجموعة من {config.LAWS_CORPUS_FILE} ...")
@@ -63,27 +62,27 @@ def main() -> int:
         print(f"  --limit → {len(articles)} مادة")
 
     if not articles:
-        print("✗ ما في ولا مادة للفهرسة.")
+        print("لا توجد أي مادة قابلة للفهرسة.")
         return 1
 
-    # ── 2) هل الفهرس الموجود مطابق أصلاً؟ ────────────────────────────────
+    # هل الفهرس الموجود مطابق للمجموعة؟
     Path(qdrant_path).parent.mkdir(parents=True, exist_ok=True)
     client = QdrantClient(path=qdrant_path)
     if client.collection_exists(collection):
         n_cached = client.count(collection).count
         if n_cached == len(articles):
-            print(f"✓ الفهرس موجود ومطابق ({n_cached} نقطة) — ما في شي للبناء.")
-            print("  استعملي --force إذا بدك تعيدي البناء رغم هيك.")
+            print(f"الفهرس موجود ومطابق ({n_cached} نقطة)؛ لا حاجة للبناء.")
+            print("  استخدم --force لإعادة البناء رغم ذلك.")
             client.close()
             return 0
-        print(f"الفهرس الحالي فيه {n_cached} نقطة بس المجموعة {len(articles)} مادة → إعادة بناء.")
+        print(f"الفهرس الحالي {n_cached} نقطة بينما المجموعة {len(articles)} مادة؛ ستُعاد عملية البناء.")
         client.delete_collection(collection)
 
-    # ── 3) تحميل النموذج ──────────────────────────────────────────────────
-    print("\nتحميل BGE-M3 (أول مرة بينزّل ~2.3GB — بعدها بينقرأ من الكاش المحلي) ...")
+    # تحميل النموذج
+    print("\nتحميل BGE-M3 (ينزّل نحو 2.3GB أول مرة، ثم يُقرأ من الكاش المحلي) ...")
     embedder = model_registry.get_bgem3_flag()
 
-    # ── 4) إنشاء المجموعة ─────────────────────────────────────────────────
+    # إنشاء المجموعة
     client.create_collection(
         collection_name=collection,
         vectors_config={"dense": models.VectorParams(size=1024, distance=models.Distance.COSINE)},
@@ -92,11 +91,11 @@ def main() -> int:
     client.create_payload_index(collection, "status", models.PayloadSchemaType.KEYWORD)
     client.create_payload_index(collection, "law_id", models.PayloadSchemaType.KEYWORD)
 
-    # ── 5) الترميز والفهرسة ────────────────────────────────────────────────
+    # الترميز والفهرسة
     device = config.resolve_device()
     print(f"\nترميز {len(articles)} مادة على {device} (batch={args.batch}) ...")
     if device == "cpu":
-        print("⚠️ ما في GPU — على CPU هالخطوة ممكن تاخد 20–60 دقيقة. شغّليها ورّوحي اعملي شي تاني.")
+        print("لا تتوفر GPU؛ قد تستغرق هذه الخطوة على الـ CPU من 20 إلى 60 دقيقة.")
 
     t0 = time.time()
     done = 0
@@ -138,9 +137,9 @@ def main() -> int:
     print()
     n = client.count(collection).count
     client.close()
-    print(f"\n✓ تم — {n} نقطة بـ {(time.time() - t0)/60:.1f} دقيقة")
+    print(f"\nاكتمل البناء: {n} نقطة في {(time.time() - t0)/60:.1f} دقيقة")
     print(f"  الفهرس محفوظ بـ: {qdrant_path}")
-    print("  السيرفر رح يفتحه مباشرة بدون إعادة بناء.")
+    print("  سيفتحه الخادم مباشرة دون إعادة بناء.")
     return 0
 
 

@@ -1,8 +1,7 @@
 """
-اختبار منطق التحقق بميزة الحكم الأولي — بدون نماذج وبدون استدعاء LLM.
+اختبار منطق التحقق في ميزة الحكم الأولي، دون نماذج ودون استدعاء نموذج لغوي.
 
-منقول عن خلية الاختبار بالنوتبوك (cell 73) مع إضافات لطبقات v3.
-بيشتغل بثانية، فمفيد كل ما تعدّلي شي بـ services/judgment.py.
+ينتهي خلال ثانية، فيصلح للتشغيل بعد كل تعديل على services/judgment.py.
 
     python scripts/test_judgment_logic.py
 """
@@ -40,7 +39,7 @@ def check(name: str, got, expected):
 
 @dataclass
 class FakeArt:
-    """يقلّد SearchResult من laws_rag (بس الحقول يلي بيلمسها التحقق)."""
+    """يحاكي SearchResult من laws_rag، بالحقول التي يستعملها التحقق فقط."""
     article_id: str
     body: str
     law_name: str = "قانون العقوبات العام"
@@ -62,7 +61,7 @@ CTX = {
 }
 
 
-# ═══════════════ 1. تحقق الاقتباسات (نفس حالات النوتبوك) ═══════════════
+# 1. تحقق الاقتباسات
 
 def test_charge_quotes():
     print("\n[1] verify_charge_quotes — الاقتباس لازم يكون حرفياً بنص المادة")
@@ -81,13 +80,13 @@ def test_charge_quotes():
         flags = verify_charge_quotes(result, CTX, cfg)
         check(name, bool(flags), expect_flag)
 
-    # article_id مش موجود بالسياق
+    # article_id غير موجود في السياق
     result = {"candidate_charges": [
         {"charge": "إساءة أمانة", "article_id": "law:999", "supporting_quote": "أي كلام"}]}
     check("article_id غير موجود", bool(verify_charge_quotes(result, CTX, cfg)), True)
 
     # اقتباس طويل جداً (تحايل على الفحص: نسخ نص المادة كامل بدل ركن محدد).
-    # الحد = max_quote_words * 2 = 24 كلمة، فمنستعمل متن أطول حتى نتجاوزه فعلاً.
+    # الحد = max_quote_words * 2 = 24 كلمة، فيُستعمل متن أطول لتجاوزه فعلاً.
     long_body = BODY_656 + " " + " ".join(f"كلمة{i}" for i in range(20))
     ctx_long = dict(CTX, retrieved_laws=[FakeArt("law:656", long_body)])
     long_quote = " ".join(long_body.split()[:30])          # 30 كلمة > 24
@@ -98,7 +97,7 @@ def test_charge_quotes():
     check("سبب الرفض هو الطول", "طويل جداً" in flags[0]["reason"], True)
 
 
-# ═══════════════ 2. تحقق هوية الاستشهادات ═══════════════
+# 2. تحقق هوية الاستشهادات
 
 def test_grounding():
     print("\n[2] verify_grounding — ممنوع الاستشهاد بشي مو بالسياق")
@@ -111,18 +110,18 @@ def test_grounding():
     v = verify_grounding({"cited_statutes": [], "cited_precedents": ["12345"]}, CTX)
     check("استشهاد مختلق بسابقة", v["unknown_case_citations"], ["12345"])
 
-    # عقوبة فيها أرقام مش موجودة بنص المادة → هلوسة محتملة
+    # عقوبة تتضمن أرقاماً غير واردة في نص المادة؛ هلوسة محتملة.
     v = verify_grounding({"cited_statutes": ["law:656"], "cited_precedents": [],
                           "suggested_penalty_range": "الحبس من خمس إلى عشر سنوات و 5000 ليرة"}, CTX)
     check("أرقام عقوبة غير مسنودة", v["possible_penalty_hallucination_in"], ["law:656"])
 
-    # عقوبة منقولة حرفياً من نص المادة → سليمة
+    # عقوبة منقولة حرفياً من نص المادة؛ سليمة.
     v = verify_grounding({"cited_statutes": ["law:656"], "cited_precedents": [],
                           "suggested_penalty_range": "الحبس من ستة أشهر إلى سنتين"}, CTX)
     check("عقوبة منقولة حرفياً", v["possible_penalty_hallucination_in"], [])
 
 
-# ═══════════════ 3. كشف المواد المتشابهة لفظياً (ADAPT) ═══════════════
+# 3. كشف المواد المتشابهة لفظياً (ADAPT)
 
 def test_confusable():
     print("\n[3] detect_confusable_statutes — كشف 656/657")
@@ -132,17 +131,17 @@ def test_confusable():
     pairs = detect_confusable_statutes(laws, cfg)
     check("زوج متشابه مكتشف", len(pairs) >= 1, True)
 
-    # مواد من قوانين مختلفة ما بتتقارن
+    # مواد من قوانين مختلفة لا تُقارن.
     laws2 = [FakeArt("a:1", BODY_656, law_name="قانون العقوبات"),
              FakeArt("b:1", BODY_656, law_name="قانون التجارة")]
     check("قوانين مختلفة لا تُقارن", detect_confusable_statutes(laws2, cfg), [])
 
-    # عتبة عالية → ما في أزواج
+    # عتبة عالية؛ لا أزواج متوقعة.
     cfg_high = JudgmentConfig(confusable_overlap_threshold=0.99)
     check("عتبة عالية تمنع الكشف", detect_confusable_statutes(laws, cfg_high), [])
 
 
-# ═══════════════ 4. تناقض السوابق (LegalReasoner-style) ═══════════════
+# 4. تناقض السوابق
 
 def test_precedent_consistency():
     print("\n[4] verify_precedent_consistency — تعارض رقم المادة مع تسبيب السابقة")
@@ -158,19 +157,19 @@ def test_precedent_consistency():
     check("تعارض مكتشف (اخترنا 656 والسابقة بتقول 657)",
           len(out["precedent_article_mismatches"]), 1)
 
-    # نفس الرقم → ما في تعارض
+    # الرقم نفسه؛ لا تعارض.
     ctx["retrieved_cases"][0]["reasoning_text"] = "تنطبق أحكام المادة 656 من قانون العقوبات"
     out = verify_precedent_consistency(result, ctx)
     check("لا تعارض لما الرقمين متطابقين", out["precedent_article_mismatches"], [])
 
-    # سابقة غير مرتبطة بتسمية مرشحة → بتنتجاهل
+    # سابقة غير مرتبطة بتسمية مرشحة؛ تُتجاهل.
     ctx["retrieved_cases"][0]["reasoning_text"] = "أحكام المادة 999"
     ctx["retrieved_cases"][0].pop("_matched_candidate_label")
     out = verify_precedent_consistency(result, ctx)
     check("سابقة غير مرتبطة تُتجاهل", out["precedent_article_mismatches"], [])
 
 
-# ═══════════════ 5. verify_all المجمّع ═══════════════
+# 5. verify_all المجمّع
 
 def test_verify_all():
     print("\n[5] verify_all — fully_grounded بس لما كل الفحوص تنجح")
@@ -189,7 +188,7 @@ def test_verify_all():
           verify_all(bad, CTX, cfg)["fully_grounded"], False)
 
 
-# ═══════════════ 6. بناء الـ Prompt ═══════════════
+# 6. بناء الـ Prompt
 
 def test_prompt_builder():
     print("\n[6] LegalPromptBuilder — كل الأقسام موجودة بالـ prompt")
@@ -228,11 +227,11 @@ def test_prompt_builder():
 
     # لما نطفي إعادة التنظيم، ما بتنعرض للـ LLM
     cfg_off = JudgmentConfig(show_reorganized_facts_to_llm=False)
-    check("إعادة التنظيم بتنخفي لما تنطفي",
+    check("كتلة إعادة التنظيم تختفي عند تعطيلها",
           "الدافع الذاتي" in LegalPromptBuilder().build(ctx, cfg_off), False)
 
 
-# ═══════════════ 7. تمرير الإعدادات من الطلب ═══════════════
+# 7. تمرير الإعدادات من الطلب
 
 def test_config_overrides():
     print("\n[7] JudgmentConfig.from_request — الأولوية للطلب")
@@ -248,7 +247,7 @@ def test_config_overrides():
 
 
 def main() -> int:
-    print("اختبار منطق الحكم الأولي (بدون نماذج / بدون LLM)")
+    print("اختبار منطق الحكم الأولي (دون نماذج ودون نموذج لغوي)")
     print("=" * 60)
     test_charge_quotes()
     test_grounding()

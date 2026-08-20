@@ -1,9 +1,9 @@
 """
-اختبار سريع لكل المسارات — بيشتغل على سيرفر شغّال.
+اختبار سريع لجميع المسارات؛ يتطلب خادماً قيد التشغيل.
 
-    python scripts/smoke_test.py                    # كل الميزات
-    python scripts/smoke_test.py --only laws        # ميزة وحدة
-    python scripts/smoke_test.py --skip judgment    # تخطّي الحكم (بيكلّف استدعاءات LLM)
+    python scripts/smoke_test.py                    # جميع الميزات
+    python scripts/smoke_test.py --only laws        # ميزة واحدة
+    python scripts/smoke_test.py --skip judgment    # تخطّي الحكم الأولي
 """
 
 import argparse
@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
-# كونسول ويندوز بيشتغل بـ cp1256 وما بيقدر يطبع «✓» ولا عربي — منجبره على UTF-8.
+# الترميز الافتراضي لكونسول ويندوز cp1256 ولا يدعم العربية؛ يُجبَر على UTF-8.
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -37,7 +37,7 @@ TESTS = [
      {"text": FACTS, "top_k": 3, "hybrid_top_k": 10}),
     ("search", "POST", "/api/legal/search", {"text": "السرقة الموصوفة", "top_k": 2}),
     ("judgment", "POST", "/api/legal/judgment/predict", {"text": FACTS}),
-    # suggest=false حتى الاختبار السريع ما يستهلك حصة Groq
+    # suggest=false كي لا يستهلك الاختبار السريع حصة النموذج اللغوي.
     ("contracts", "POST", "/api/legal/contracts/search",
      {"text": "بدي عقد إيجار محل تجاري", "top_k": 3, "suggest": False}),
 ]
@@ -61,7 +61,7 @@ def call(method: str, path: str, body=None, timeout: int = 900):
 
 
 def summarize(name: str, payload: dict) -> str:
-    """سطر واحد يوصف النتيجة، حسب نوع الميزة."""
+    """سطر واحد يصف النتيجة بحسب نوع الميزة."""
     d = payload.get("data", payload)
     if name == "health":
         return f"device={d.get('models', {}).get('device')} loaded={d.get('features')}"
@@ -108,10 +108,10 @@ def main() -> int:
         if args.only and name not in args.only:
             continue
         if name in args.skip:
-            print(f"–  {name:<10} تخطّي")
+            print(f"-  {name:<10} تخطٍّ")
             continue
 
-        print(f"…  {name:<10} {method} {path}", flush=True)
+        print(f".  {name:<10} {method} {path}", flush=True)
         status, payload, secs = call(method, path, body)
 
         if status == 200:
@@ -123,9 +123,9 @@ def main() -> int:
 
     print()
     if failures:
-        print(f"{failures} اختبار فشل.")
+        print(f"فشل {failures} اختبار.")
     else:
-        print("كل الاختبارات نجحت ✓")
+        print("نجحت جميع الاختبارات.")
     return 1 if failures else 0
 
 

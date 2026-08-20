@@ -1,24 +1,15 @@
 """
-Part D — RAG نماذج العقود (Contracts RAG).
+الاسترجاع الدلالي لنماذج العقود.
 
-مأخوذ من contract_RAG.ipynb: تحضير نصوص البحث من hammurabi_templates_flat.json،
-فهرس FAISS (IndexFlatIP على متجهات مُعيَّرة = cosine)، ثم طبقة LLM بتقترح الأنسب
-من قائمة المرشحين.
+يحضّر نصوص البحث من ملف نماذج العقود، ويبني فهرس FAISS من نوع IndexFlatIP على
+متجهات مُعيَّرة (أي تشابه cosine)، ثم تقترح طبقة النموذج اللغوي الأنسب من قائمة
+المرشحين.
 
-التغييرات عن النوتبوك:
-  1. الحلقة التفاعلية (input/print) انحذفت — الـ route بيرجّع JSON.
-     `interactive_search()` صارت خطوتين: /contracts/search ثم /contracts/get.
-     الاختيار صار بـ doc_id (مفتاح ثابت) بدل مطابقة الاسم حرفياً.
-  2. الاقتراح بينعمل عبر Groq متل باقي المشروع، مش بتحميل Qwen2.5-7B محلياً
-     (النوتبوك كان على GPU كولاب؛ ~15GB أوزان ما بتنحمّل مع باقي النماذج).
-     البرومبت منقول حرفياً.
-  3. pandas انحذف — الـ DataFrame استُبدل بقائمة dict، وهيك ما منزيد اعتمادية
-     جديدة على المشروع.
-  4. نموذج الـ embedding بيجي من model_registry (مشترك) إذا كان نفس نموذج
-     المشروع؛ وإلا بينحمّل نسخته الخاصة (شوف CONTRACTS_EMBEDDING_MODEL).
+الميزة خطوتان: /contracts/search يعيد المرشحين، و/contracts/get يعيد النموذج
+كاملاً بحسب doc_id.
 
-منطق التحضير والبحث (تنظيف [[1:text]]، بناء search_text، بادئات e5، cosine)
-منقول حرفياً عن النوتبوك.
+نموذج الترميز مشترك عبر model_registry إن كان نموذج المشروع نفسه، وإلا حُمِّلت
+نسخة خاصة به (انظر CONTRACTS_EMBEDDING_MODEL).
 """
 
 import json
@@ -42,7 +33,7 @@ def _log(msg: str) -> None:
     print(f"[contracts] {msg}", flush=True)
 
 
-# ════════════════════════════ نموذج الـ Embedding ════════════════════════════
+# نموذج الترميز
 
 _own_encoder = None
 _encoder_lock = threading.Lock()
@@ -53,7 +44,7 @@ def _uses_shared_model() -> bool:
 
 
 def _get_encoder():
-    """نفس نموذج المشروع من المستودع المشترك، أو نسخة خاصة إذا انطلب غيره."""
+    """نموذج المشروع من المستودع المشترك، أو نسخة خاصة إن طُلب نموذج آخر."""
     if _uses_shared_model():
         return model_registry.get_dense_encoder()
 
@@ -73,20 +64,20 @@ def _get_encoder():
 
 
 def _needs_e5_prefix(model_name: str) -> bool:
-    """موديلات e5 لازمها بادئة «query:» / «passage:»، غيرها لأ (BGE-M3 مثلاً)."""
+    """نماذج e5 تتطلب بادئة «query:» أو «passage:»، بخلاف غيرها مثل BGE-M3."""
     return "e5" in model_name.lower()
 
 
-# ═══════════════════════════════ تحضير البيانات ═══════════════════════════════
+# تحضير البيانات
 
 def _prepare_record(tpl: Dict) -> Dict:
-    """تحويل تمبلت خام لسجل جاهز للفهرسة — منقول عن الخلية الثانية بالنوتبوك."""
+    """تحويل نموذج خام إلى سجل جاهز للفهرسة."""
     doc_cat = tpl.get("DocCat", "")
     subject = tpl.get("Subject", "")
     index_val = tpl.get("Index", "") or ""
     body = tpl.get("Body", "") or ""
 
-    # تنظيف نص الـ Body من التاغات متل [[1:text]]
+    # تنظيف نص الـ Body من الوسوم من نمط [[1:text]]
     clean_body = _TAG_RE.sub(" ", body)
     clean_body = _WS_RE.sub(" ", clean_body).strip()
 
@@ -115,7 +106,7 @@ def _load_templates(json_path: str) -> List[Dict]:
     return []
 
 
-# ═══════════════════════════════════ المحرك ═══════════════════════════════════
+# المحرك
 
 class ContractsRAG:
     """بحث دلالي بنماذج العقود + استرجاع النموذج كامل بالـ doc_id."""
@@ -126,10 +117,10 @@ class ContractsRAG:
         self._by_doc_id: Dict[str, int] = {}
         self._ready = False
 
-    # ─────────────────────────── تحميل / بناء ───────────────────────────
+    # التحميل والبناء
 
     def _reindex_lookup(self) -> None:
-        # ⚠️ النوتبوك حذّر من تكرار DocID — أول ظهور بيربح، والباقي بينطبع كتحذير
+        # عند تكرار DocID يُعتمد أول ظهور ويُسجَّل تنبيه بالباقي.
         self._by_doc_id = {}
         duplicates = 0
         for i, rec in enumerate(self.records):
@@ -141,14 +132,14 @@ class ContractsRAG:
                 continue
             self._by_doc_id[key] = i
         if duplicates:
-            _log(f"⚠️ {duplicates} DocID مكرر — انعتمد أول ظهور لكل واحد.")
+            _log(f"{duplicates} معرّف مكرر؛ اعتُمد أول ظهور لكل منها.")
 
     def build_from_json(self, json_path: str, save: bool = True) -> None:
         import faiss
 
         templates = _load_templates(json_path)
         if not templates:
-            raise ValueError(f"ما في نماذج عقود بالملف: {json_path}")
+            raise ValueError(f"لا توجد نماذج عقود في الملف: {json_path}")
 
         self.records = [_prepare_record(t) for t in templates]
         _log(f"تجهيز {len(self.records)} نموذج عقد ...")
@@ -162,7 +153,7 @@ class ContractsRAG:
             texts,
             batch_size=config.CONTRACTS_BUILD_BATCH,
             show_progress_bar=True,
-            normalize_embeddings=True,   # مهم عشان IndexFlatIP يساوي cosine
+            normalize_embeddings=True,   # يجعل IndexFlatIP مكافئاً لتشابه cosine
         ).astype(np.float32)
 
         self.index = faiss.IndexFlatIP(embeddings.shape[1])
@@ -180,8 +171,8 @@ class ContractsRAG:
         os.makedirs(os.path.dirname(index_file) or ".", exist_ok=True)
         faiss.write_index(self.index, index_file)
         with open(metadata_file, "wb") as f:
-            # منخزّن اسم النموذج كمان: فهرس مبني بنموذج وبحث بنموذج تاني =
-            # نتائج عشوائية بصمت، فأحسن نمسكها وقت التحميل.
+            # يُخزَّن اسم النموذج أيضاً: فهرس مبني بنموذج وبحث بنموذج آخر يعطي
+            # نتائج عشوائية دون أي خطأ، فيُكتشف الأمر عند التحميل.
             pickle.dump(
                 {"records": self.records, "model": config.CONTRACTS_EMBEDDING_MODEL}, f
             )
@@ -204,34 +195,34 @@ class ContractsRAG:
         built_with = d.get("model")
         if built_with and built_with != config.CONTRACTS_EMBEDDING_MODEL:
             _log(
-                f"⚠️ الفهرس مبني بـ «{built_with}» بس الإعدادات عم تطلب "
-                f"«{config.CONTRACTS_EMBEDDING_MODEL}» — النتائج رح تكون غلط.\n"
-                f"    شغّلي: python scripts/build_contracts_index.py --force"
+                f"الفهرس مبني بنموذج «{built_with}» بينما تطلب الإعدادات "
+                f"«{config.CONTRACTS_EMBEDDING_MODEL}»، والنتائج ستكون خاطئة.\n"
+                f"    أعد البناء: python scripts/build_contracts_index.py --force"
             )
         self._reindex_lookup()
         self._ready = True
         _log(f"الفهرس محمّل: {self.index.ntotal} نموذج عقد")
 
     def auto_load(self) -> None:
-        """يحمّل الفهرس المحفوظ إن وُجد، وإلا بيبنيه من الـ JSON ويحفظه."""
+        """يحمّل الفهرس المحفوظ إن وُجد، وإلا بناه من ملف JSON وحفظه."""
         if os.path.exists(config.CONTRACTS_INDEX_FILE) and os.path.exists(
             config.CONTRACTS_METADATA_FILE
         ):
             self.load_index()
         elif os.path.exists(config.CONTRACTS_SOURCE_JSON):
-            _log("ما في فهرس محفوظ — بناء من JSON ...")
+            _log("لا يوجد فهرس محفوظ؛ يجري البناء من ملف JSON ...")
             self.build_from_json(config.CONTRACTS_SOURCE_JSON)
         else:
             raise FileNotFoundError(
-                f"لا فهرس ولا ملف JSON لنماذج العقود.\n"
-                f"  متوقع: {config.CONTRACTS_INDEX_FILE}\n"
-                f"  أو:    {config.CONTRACTS_SOURCE_JSON}"
+                f"لم يُعثر على فهرس نماذج العقود ولا على ملف JSON لبنائه.\n"
+                f"  المتوقع: {config.CONTRACTS_INDEX_FILE}\n"
+                f"  أو:      {config.CONTRACTS_SOURCE_JSON}"
             )
 
-    # ─────────────────────────────── البحث ───────────────────────────────
+    # البحث
 
     def search(self, query_text: str, **kw) -> List[Dict]:
-        """قائمة المرشحين — نفس search_contracts يلي بالنوتبوك."""
+        """قائمة نماذج العقود المرشحة للاستعلام."""
         if not self._ready:
             raise RuntimeError("فهرس العقود غير محمّل.")
 
@@ -266,11 +257,11 @@ class ContractsRAG:
             )
         return results
 
-    # ────────────────────────── استرجاع عقد كامل ──────────────────────────
+    # استرجاع نموذج كامل
 
     def get_contract(self, doc_id: Optional[str] = None,
                      subject: Optional[str] = None) -> Optional[Dict]:
-        """النموذج كامل بالـ doc_id، أو بالعنوان الحرفي متل النوتبوك."""
+        """النموذج كاملاً بحسب doc_id، أو بحسب العنوان مطابقةً حرفية."""
         if not self._ready:
             raise RuntimeError("فهرس العقود غير محمّل.")
 
@@ -297,14 +288,14 @@ class ContractsRAG:
         }
 
     def categories(self) -> Dict[str, int]:
-        """توزيع الفئات — متل df['category'].value_counts() بالنوتبوك."""
+        """عدد النماذج في كل فئة."""
         counts: Dict[str, int] = {}
         for rec in self.records:
             counts[rec["category"]] = counts.get(rec["category"], 0) + 1
         return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
 
 
-# ══════════════════ طبقة الـ LLM: اقتراح الأنسب من المرشحين ══════════════════
+# طبقة النموذج اللغوي: اقتراح الأنسب من المرشحين
 
 class MissingAPIKey(RuntimeError):
     pass
@@ -329,9 +320,9 @@ SUGGEST_SYSTEM = (
 
 
 def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
-    """اقتراح الموديل: {"choice": رقم أو None, "reason": "..."}.
+    """اقتراح النموذج اللغوي: {"choice": رقم أو None, "reason": "..."}.
 
-    ما بيرجع العقد مباشرة — بس بيقترح، والمستخدم هو يلي بيأكد الاختيار.
+    لا يعيد العقد مباشرة؛ يقترح فحسب، ويبقى التأكيد النهائي للمستخدم.
     """
     if not candidates:
         return {"choice": None, "reason": None}
@@ -353,7 +344,7 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
 المطلوب:
 - اختر رقم المرشح (من 1 إلى {len(candidates)}) الأنسب فعلياً لطلب المستخدم من ناحية الغاية القانونية للعقد (نوع التصرف، الأطراف، طبيعة العلاقة).
 - إذا كان أكثر من مرشح مناسب، اختر الأدق تطابقاً مع تفاصيل الطلب.
-- إذا ما في أي مرشح مناسب فعلياً، ارجع choice: 0.
+- إذا لم يوجد أي مرشح مناسب فعلياً، أعد choice: 0.
 
 أجب بصيغة JSON فقط بهذا الشكل بالضبط:
 {{"choice": <رقم>, "reason": "<سبب الاختيار بجملة وحدة قصيرة بالعربي>"}}"""
@@ -373,27 +364,29 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
             temperature=p["temperature"],
         )
         try:
-            # يطفي وضع التفكير بموديلات Qwen3 على Groq — غير مدعوم بكل الموديلات
+            # يعطّل وضع التفكير في نماذج Qwen3؛ غير مدعوم في كل النماذج.
             response = client.chat.completions.create(reasoning_effort="none", **kwargs)
         except Exception:
             response = client.chat.completions.create(**kwargs)
         raw = (response.choices[0].message.content or "").strip()
         if not raw:
-            return {"choice": None, "reason": None, "error": "الموديل رجّع محتوى فارغ."}
+            return {"choice": None, "reason": None,
+                    "error": "أعاد النموذج اللغوي محتوى فارغاً."}
         parsed = json.loads(raw)
     except MissingAPIKey:
         raise
     except json.JSONDecodeError as e:
         return {"choice": None, "reason": None, "error": f"JSON غير صالح: {e}"}
     except Exception as e:
-        return {"choice": None, "reason": None, "error": f"خطأ أثناء الاتصال بـ Groq: {e}"}
+        return {"choice": None, "reason": None,
+                "error": f"تعذّر الاتصال بخدمة النموذج اللغوي: {e}"}
 
     choice = parsed.get("choice")
     try:
         choice = int(choice)
     except (TypeError, ValueError):
         choice = None
-    # 0 = «ما في مرشح مناسب» حسب البرومبت، وأي رقم برّا المدى منعتبره فشل
+    # القيمة 0 تعني «لا مرشح مناسب»، وأي رقم خارج المدى يُعدّ فشلاً.
     if not choice or not (1 <= choice <= len(candidates)):
         return {"choice": None, "reason": parsed.get("reason")}
 
@@ -406,7 +399,7 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
     }
 
 
-# ══════════════════════ واجهة الاستخدام من الـ Backend ══════════════════════
+# واجهة الاستخدام
 
 _instance: Optional[ContractsRAG] = None
 _init_lock = threading.Lock()
@@ -429,7 +422,7 @@ def get_rag() -> ContractsRAG:
 
 
 def search_contracts(query_text: str, **kw) -> Dict:
-    """بحث + (اختيارياً) اقتراح LLM — بغلاف جاهز للـ JSON response."""
+    """بحث مع اقتراح اختياري، بغلاف جاهز لاستجابة JSON."""
     if not query_text or not query_text.strip():
         return {"query": query_text, "error": "الاستعلام فارغ.", "results": []}
 
@@ -450,7 +443,7 @@ def search_contracts(query_text: str, **kw) -> Dict:
         "count": len(results),
         "results": results,
         "suggestion": suggestion,
-        "message": None if results else "ما في نماذج عقود مطابقة لطلبك.",
+        "message": None if results else "لا توجد نماذج عقود مطابقة للطلب.",
         "params_used": p,
         "took_ms": int((time.time() - t0) * 1000),
     }

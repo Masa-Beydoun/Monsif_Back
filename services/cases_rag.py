@@ -1,13 +1,11 @@
 """
-Part B — RAG السوابق القضائية (Cases RAG).
+الاسترجاع الدلالي للسوابق القضائية.
 
-مأخوذ من predection.ipynb (القسم B): HybridVectorStore + BaseLegalRAG + CaseLegalRAG.
-التغييرات عن النوتبوك:
-  1. حذف كل طبقة العرض (HTML/IPython) — الـ route بيرجّع JSON.
-  2. النماذج بتيجي من model_registry (مشتركة) بدل ما كل نسخة تحمّل نموذجها.
-  3. top_k / threshold / hybrid_top_k صارت قابلة للتمرير مع كل استدعاء.
+مسار البحث: FAISS dense مع BM25 sparse ← دمج RRF ← إعادة ترتيب بالـ
+cross-encoder ← تطبيق عتبة التشابه.
 
-منطق البحث (FAISS dense + BM25 sparse → RRF → CrossEncoder → عتبة) منقول حرفياً.
+النماذج مشتركة عبر model_registry، وبارامترات top_k و threshold و hybrid_top_k
+قابلة للتمرير مع كل استدعاء.
 """
 
 import json
@@ -26,7 +24,7 @@ from services import model_registry
 class HybridVectorStore:
     """محرك بحث هجين (Dense FAISS + Sparse BM25 + RRF Fusion).
 
-    ما بيعرف شي عن كون العناصر «قضايا» أو «مواد» — بس بياخد text_builder.
+    محايد تجاه نوع العناصر؛ يعتمد على text_builder المُمرَّر إليه.
     """
 
     def __init__(self, text_builder: Callable[[Dict], str]):
@@ -38,7 +36,7 @@ class HybridVectorStore:
 
     @property
     def model(self):
-        # كسول: النموذج بينحمّل أول ما نحتاجه فعلياً، مش وقت البناء
+        # تحميل كسول: يُحمَّل النموذج عند الحاجة الفعلية لا عند الإنشاء.
         return model_registry.get_dense_encoder()
 
     def build(self, items: List[Dict], batch_size: int = 32) -> None:
@@ -83,10 +81,10 @@ class HybridVectorStore:
         print(f"[cases] الفهرس الهجين محمّل: {self.index.ntotal} عنصر", flush=True)
 
     def search_hybrid(self, query: str, top_k: int) -> List[Dict]:
-        """أفضل top_k عنصر بعد دمج (Dense + Sparse) عبر RRF.
+        """أفضل top_k عنصر بعد دمج Dense و Sparse عبر RRF.
 
-        الدمج بيصير على الـ index الداخلي i (مش case_number) لضمان صحته حتى لو
-        تكررت الأرقام أو كانت مفقودة.
+        يجري الدمج على الفهرس الداخلي i لا على case_number، ضماناً لصحته حتى
+        عند تكرار الأرقام أو غيابها.
         """
         q_vec = self.model.encode([query], normalize_embeddings=True).astype(np.float32)
         _, dense_indices = self.index.search(q_vec, top_k)
@@ -112,7 +110,7 @@ class CasesRAG:
         self.store = HybridVectorStore(text_builder=self._build_text)
         self._ready = False
 
-    # ── كيف نجهّز نص العنصر للـ embedding / إعادة الترتيب ──
+    # تجهيز نص العنصر للترميز وإعادة الترتيب.
     @staticmethod
     def _build_text(item: Dict) -> str:
         facts = item.get("facts_text", "")
@@ -136,7 +134,7 @@ class CasesRAG:
             "judgment_text": item.get("judgment_text", ""),
         }
 
-    # ─────────────────────────── تحميل / بناء ───────────────────────────
+    # التحميل والبناء
 
     def load_index(self) -> None:
         self.store.load(config.CASES_INDEX_FILE, config.CASES_METADATA_FILE)
@@ -152,23 +150,23 @@ class CasesRAG:
         self._ready = True
 
     def auto_load(self) -> None:
-        """يحمّل الفهرس المحفوظ إن وُجد، وإلا بيبنيه من الـ JSON ويحفظه."""
+        """يحمّل الفهرس المحفوظ إن وُجد، وإلا بناه من ملف JSON وحفظه."""
         if os.path.exists(config.CASES_INDEX_FILE) and os.path.exists(config.CASES_METADATA_FILE):
             self.load_index()
         elif os.path.exists(config.CASES_SOURCE_JSON):
-            print("[cases] ما في فهرس محفوظ — بناء من JSON ...", flush=True)
+            print("[cases] لا يوجد فهرس محفوظ؛ يجري البناء من ملف JSON ...", flush=True)
             self.build_from_json(config.CASES_SOURCE_JSON)
         else:
             raise FileNotFoundError(
-                f"لا فهرس ولا ملف JSON للقضايا.\n"
-                f"  متوقع: {config.CASES_INDEX_FILE}\n"
-                f"  أو:    {config.CASES_SOURCE_JSON}"
+                f"لم يُعثر على فهرس السوابق ولا على ملف JSON لبنائه.\n"
+                f"  المتوقع: {config.CASES_INDEX_FILE}\n"
+                f"  أو:      {config.CASES_SOURCE_JSON}"
             )
 
-    # ─────────────────────────────── البحث ───────────────────────────────
+    # البحث
 
     def query_raw(self, query_text: str, **kw) -> List[Dict]:
-        """بترجع قائمة نتائج مباشرة — بيستعملها محرك الحكم الأولي."""
+        """يعيد قائمة النتائج مباشرة؛ يستعملها محرك الحكم الأولي."""
         if not self._ready:
             raise RuntimeError("فهرس القضايا غير محمّل.")
 
@@ -194,7 +192,7 @@ class CasesRAG:
         return results[:p["top_k"]]
 
     def query(self, query_text: str, **kw) -> Dict:
-        """نفس query_raw بس بغلاف جاهز للـ JSON response."""
+        """مثل query_raw مع غلاف جاهز لاستجابة JSON."""
         if not query_text or not query_text.strip():
             return {"query": query_text, "error": "الاستعلام فارغ.", "results": []}
 
@@ -214,7 +212,7 @@ class CasesRAG:
         }
 
 
-# ══════════════════════ واجهة الاستخدام من الـ Backend ══════════════════════
+# واجهة الاستخدام
 
 _instance: Optional[CasesRAG] = None
 _init_lock = threading.Lock()

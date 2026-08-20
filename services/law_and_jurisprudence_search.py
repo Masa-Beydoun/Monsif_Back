@@ -1,3 +1,5 @@
+"""البحث في المواد القانونية والاجتهادات القضائية (فهارس هجينة جاهزة)."""
+
 import os
 import pickle
 from typing import Dict, List, Callable, Optional
@@ -8,11 +10,10 @@ import config
 from services import model_registry
 
 
-# ══════════════════════════════════════ الإعدادات ══════════════════════════════════════
+# الإعدادات
 
 EMBEDDING_MODEL = config.EMBEDDING_MODEL
 RERANKER_MODEL  = config.RERANKER_MODEL
-# كان مسار Google Drive تبع Colab — صار مسار محلي داخل المشروع.
 BASE_DIR = str(config.UTILS_DIR)
 
 
@@ -27,7 +28,7 @@ HYBRID_TOP_K = 10    # عدد المرشحين الأوليين قبل إعاد�
 ARTICLE_THRESHOLD = 0.60  # عتبة التشابه للمواد القانونية
 JURIS_THRESHOLD   = 0.60  # عتبة التشابه للاجتهادات القضائية
 
-# كلمات مفتاحية لتحديد نية المستخدم — بدون أي LLM
+# كلمات مفتاحية لتحديد نية المستخدم دون أي نموذج لغوي.
 JURIS_KEYWORDS = [
     "اجتهاد", "الاجتهاد", "اجتهادات", "الاجتهادات",
     "سابقة قضائية", "سوابق قضائية",
@@ -43,7 +44,7 @@ ARTICLE_KEYWORDS = [
 ]
 
 
-# ══════════════════════════════════ دوال بناء النصوص ══════════════════════════════════
+# دوال بناء النصوص
 
 def build_article_text(article: Dict) -> str:
     """يحوّل قاموس المادة القانونية إلى نص غني بالسياق (لفهرس المواد)."""
@@ -103,7 +104,7 @@ def detect_query_mode(query_text: str) -> str:
     return "both"
 
 
-# ══════════════════════════════════ الفهرس الهجين ══════════════════════════════════
+# الفهرس الهجين
 
 class LegalVectorStore:
     """فهرس هجين (Dense FAISS + Sparse BM25) عام، يُحمَّل من القرص فقط في وضع الـ Backend."""
@@ -128,7 +129,7 @@ class LegalVectorStore:
         with open(meta_path, "rb") as f:
             d = pickle.load(f)
         self.records, self.texts, self.bm25 = d["records"], d["texts"], d["bm25"]
-        print(f" تم تحميل الفهرس: {self.index.ntotal} سجل ← {os.path.basename(idx_path)}")
+        print(f"[search] تم تحميل الفهرس: {self.index.ntotal} سجل ← {os.path.basename(idx_path)}")
 
     def search_hybrid(self, query: str, top_k: int = HYBRID_TOP_K) -> List[Dict]:
         """يدمج نتائج FAISS (دلالي) و BM25 (كلمات مفتاحية) عبر Reciprocal Rank Fusion."""
@@ -154,7 +155,7 @@ class LegalVectorStore:
         return [self.records[i] for i in sorted_indices]
 
 
-# ══════════════════════════════════════ RAG الرئيسي ══════════════════════════════════════
+# محرك الاسترجاع
 
 class LegalRAG:
     """
@@ -163,7 +164,7 @@ class LegalRAG:
     """
 
     def __init__(self):
-        # النماذج مشتركة مع باقي الميزات عبر model_registry — ما بتنحمّل نسخة تانية.
+        # النماذج مشتركة مع باقي الميزات عبر model_registry؛ لا تُحمَّل نسخة ثانية.
         shared_model = model_registry.get_dense_encoder(max_seq_length=1024)
 
         self.article_store = LegalVectorStore(text_builder=build_article_text, model=shared_model)
@@ -179,11 +180,11 @@ class LegalRAG:
         self.juris_store.load(JURIS_INDEX_FILE, JURIS_METADATA_FILE)
         self._ready = True
 
-    # ─────────────────────────────────── البحث ───────────────────────────────────
+    # البحث
     def _rank_candidates(self, query_text: str, candidates: List[Dict],
                           text_builder: Callable[[Dict], str], threshold: float,
                           top_k: int, mapper: Callable[[Dict, float], Dict]) -> List[Dict]:
-        """يعيد ترتيب مرشحين بواسطة الـ CrossEncoder، يستبعد ما دون العتبة، ويقتصر على top_k"""
+        """إعادة ترتيب المرشحين بالـ CrossEncoder، واستبعاد ما دون العتبة، والاقتصار على top_k."""
         if not candidates:
             return []
 
@@ -194,7 +195,7 @@ class LegalRAG:
 
         ranked = []
         for i, score in enumerate(scores):
-            # حساب نسبة الـ Sigmoid
+            # تحويل الدرجة إلى احتمال عبر sigmoid
             prob = float(1 / (1 + np.exp(-score)))
 
             if prob <= threshold:
@@ -232,7 +233,7 @@ class LegalRAG:
     def query(self, query_text: str, top_k: int = TOP_K, mode: Optional[str] = None) -> Dict:
         """
         mode: 'articles' | 'jurisprudence' | 'both' | None (اكتشاف تلقائي من نص الاستعلام)
-        يعيد قاموساً جاهزاً للتحويل إلى JSON — بدون أي HTML وبدون أي LLM.
+        يعيد قاموساً جاهزاً للتحويل إلى JSON.
         """
         if not self._ready:
             raise RuntimeError("الفهارس غير محمّلة بعد. استدعِ load_index() أولاً (أو استخدم search_legal()).")
@@ -251,7 +252,7 @@ class LegalRAG:
             )
             response["articles"] = (
                 {"found": True, "results": results} if results else
-                {"found": False, "message": " لا توجد مواد قانونية مطابقة تتجاوز عتبة التشابه المطلوبة."}
+                {"found": False, "message": "لا توجد مواد قانونية مطابقة تتجاوز عتبة التشابه المطلوبة."}
             )
 
         if effective_mode in ("jurisprudence", "both"):
@@ -262,21 +263,21 @@ class LegalRAG:
             )
             response["jurisprudence"] = (
                 {"found": True, "results": results} if results else
-                {"found": False, "message": " لا توجد اجتهادات قضائية مطابقة تتجاوز عتبة التشابه المطلوبة."}
+                {"found": False, "message": "لا توجد اجتهادات قضائية مطابقة تتجاوز عتبة التشابه المطلوبة."}
             )
 
         return response
 
 
-# ══════════════════════════════ واجهة الاستخدام من الـ Backend ══════════════════════════════
+# واجهة الاستخدام
 
 _rag_instance: Optional[LegalRAG] = None
 
 
 def warmup() -> None:
-    """
-    حمّل النماذج والفهارس مرة واحدة. استدعِها عند إقلاع السيرفر (startup event)
-    كي لا يتحمّل أول مستخدم تأخير تحميل النماذج.
+    """تحميل النماذج والفهارس مرة واحدة.
+
+    تُستدعى عند إقلاع الخادم كي لا يتحمّل أول مستخدم تأخير التحميل.
     """
     global _rag_instance
     if _rag_instance is None:
@@ -293,11 +294,7 @@ def get_rag() -> LegalRAG:
 
 
 def search_legal(query_text: str, top_k: int = TOP_K, mode: Optional[str] = None) -> Dict:
-    """
-    الدالة الوحيدة التي يحتاجها الـ Backend لاستدعائها:
-
-        from legal_rag import search_legal
-        result = search_legal(user_input)
+    """الدالة الوحيدة التي يحتاجها الـ route.
 
     Args:
         query_text: نص استعلام المستخدم (اجتهاد / مادة / وقائع قضية).

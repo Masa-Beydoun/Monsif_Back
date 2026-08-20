@@ -1,27 +1,26 @@
 """
-كل الإعدادات القابلة للتعديل بمكان واحد.
+جميع الإعدادات القابلة للتعديل في مكان واحد.
 
-كل قيمة هون ممكن تتغير بثلاث طرق (الأولوية من الأضعف للأقوى):
-  1. القيمة الافتراضية المكتوبة تحت.
-  2. متغير بيئة بملف .env  (مثال: LAWS_TOP_N=7).
-  3. قيمة مُرسلة بجسم الطلب نفسه (per-request override) — شوف الـ routes.
+تُضبط كل قيمة بثلاث طرق، والأولوية من الأضعف إلى الأقوى:
+  1. القيمة الافتراضية المذكورة أدناه.
+  2. متغير بيئة في ملف .env  (مثال: LAWS_TOP_N=7).
+  3. قيمة مُرسلة ضمن جسم الطلب، وتسري على ذلك الطلب وحده.
 """
 
 import os
 import sys
 from pathlib import Path
 
-# ── إجبار stdout/stderr على UTF-8 ───────────────────────────────────────────────
-# كونسول ويندوز بيشتغل بترميز cp1256، وهاد ما بيقدر يطبع «→» ولا رموز الجداول،
-# فأي print فيه رموز بيرمي UnicodeEncodeError ويوقّف السكربت. هون منصلّحها مرة
-# وحدة لكل المشروع (config بينستورد من كل مكان).
+# إجبار stdout/stderr على ترميز UTF-8.
+# الترميز الافتراضي لكونسول ويندوز هو cp1256 ولا يدعم كثيراً من الرموز، فيرمي
+# أي print يحتوي عليها UnicodeEncodeError. تُضبط هنا مرة واحدة للمشروع كله.
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, ValueError):        # stream مش قابل لإعادة الضبط
+    except (AttributeError, ValueError):        # مجرى غير قابل لإعادة الضبط
         pass
 
-# ── تحميل .env إن وُجد (اختياري — ما بيفشل إذا python-dotenv مش منصّب) ──────────
+# تحميل .env إن وُجد؛ لا يفشل إذا لم تكن python-dotenv مثبّتة.
 try:
     from dotenv import load_dotenv
 
@@ -54,24 +53,24 @@ def _f(name: str, default: float) -> float:
         return default
 
 
-# ══════════════════════════════════ النماذج ══════════════════════════════════
+# النماذج
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
-# "cpu" | "cuda" | "auto"  — auto = cuda إذا متوفرة، وإلا cpu
+# "cpu" | "cuda" | "auto" — auto يختار cuda إن توفّرت، وإلا cpu.
 DEVICE = os.getenv("DEVICE", "auto")
 
-# fp16 بيشتغل بس على GPU؛ على CPU بينتجل بطء أو أخطاء، فمنطفيه تلقائياً
+# fp16 مدعوم على الـ GPU فقط؛ يُعطَّل تلقائياً على الـ CPU.
 USE_FP16 = _b("USE_FP16", True)
 
-# مكان تخزين أوزان HuggingFace — بتنزل مرة وحدة وبتنعاد استخدامها كل مرة
+# مكان تخزين أوزان HuggingFace؛ تُنزَّل مرة واحدة ويُعاد استخدامها.
 HF_HOME = os.getenv("HF_HOME", str(BASE_DIR / ".hf_cache"))
 os.environ.setdefault("HF_HOME", HF_HOME)
 os.environ.setdefault("TRANSFORMERS_OFFLINE", os.getenv("TRANSFORMERS_OFFLINE", "0"))
 
 
-# ═══════════════════════ Part A — RAG المواد القانونية ═══════════════════════
+# المواد القانونية
 
 LAWS_DIR = Path(os.getenv("LAWS_DIR", DATA_DIR / "laws"))
 LAWS_CORPUS_FILE = Path(os.getenv("LAWS_CORPUS_FILE", LAWS_DIR / "articles_unified.jsonl"))
@@ -79,25 +78,24 @@ LAWS_QDRANT_PATH = str(os.getenv("LAWS_QDRANT_PATH", LAWS_DIR / "qdrant_db"))
 LAWS_COLLECTION = os.getenv("LAWS_COLLECTION", "syrian_law_articles")
 
 LAWS_DEFAULTS = {
-    # كم مادة ترجع بالنتيجة النهائية (بعد إعادة الترتيب)
+    # عدد المواد في النتيجة النهائية بعد إعادة الترتيب.
     "top_n": _i("LAWS_TOP_N", 7),
-    # كم مرشّح يُسحب من البحث الهجين قبل إعادة الترتيب.
-    # ⚠️ هاد أهم بارامتر للسرعة: كل مرشّح = تمريرة cross-encoder إضافية.
-    # النوتبوك كان 30 (على GPU). على CPU جرّب 12–15.
+    # عدد المرشحين المسحوبين من البحث الهجين قبل إعادة الترتيب.
+    # أهم بارامتر في الأداء: كل مرشح يقابل تمريرة إضافية على الـ cross-encoder.
     "hybrid_top_k": _i("LAWS_HYBRID_TOP_K", 15),
     # استبعاد المواد الملغاة من النتائج
     "exclude_repealed": _b("LAWS_EXCLUDE_REPEALED", False),
-    # عتبة الامتناع (abstention) — نتيجة تحت هالرقم بتنرمى. 0.0 = بدون عتبة
+    # عتبة الامتناع: تُستبعد أي نتيجة دون هذا الرقم. 0.0 يعني بلا عتبة.
     "min_score": _f("LAWS_MIN_SCORE", 0.0),
     # دمج المواد المرتبطة (dependency merge)
     "with_dependencies": _b("LAWS_WITH_DEPENDENCIES", True),
     "dep_depth": _i("LAWS_DEP_DEPTH", 2),
     "dep_max": _i("LAWS_DEP_MAX", 12),
     "dep_dedupe_vs_hits": _b("LAWS_DEP_DEDUPE_VS_HITS", True),
-    # تفكيك الاستعلامات الطويلة لمسائل قانونية منفصلة (يحتاج مفتاح LLM)
+    # تفكيك الاستعلامات الطويلة إلى مسائل قانونية منفصلة؛ يتطلب مفتاح نموذج لغوي.
     "decompose": _b("LAWS_DECOMPOSE", False),
     "decompose_min_words": _i("LAWS_DECOMPOSE_MIN_WORDS", 25),
-    # طول نافذة الـ cross-encoder. أصغر = أسرع، وأكبر = بيشوف نص المادة كامل
+    # طول نافذة الـ cross-encoder. القيمة الأصغر أسرع، والأكبر تغطي نص المادة كاملاً.
     "rerank_max_length": _i("LAWS_RERANK_MAX_LENGTH", 512),
 }
 
@@ -105,7 +103,7 @@ LAWS_BUILD_BATCH = _i("LAWS_BUILD_BATCH", 8)
 LAWS_EMBED_MAX_LENGTH = _i("LAWS_EMBED_MAX_LENGTH", 1024)
 
 
-# ═══════════════════════ Part B — RAG السوابق القضائية ═══════════════════════
+# السوابق القضائية
 
 CASES_DIR = Path(os.getenv("CASES_DIR", DATA_DIR / "cases"))
 CASES_INDEX_FILE = str(os.getenv("CASES_INDEX_FILE", CASES_DIR / "legal_facts_hybrid.faiss"))
@@ -114,53 +112,53 @@ CASES_SOURCE_JSON = str(os.getenv("CASES_SOURCE_JSON", CASES_DIR / "standard_cas
 
 CASES_DEFAULTS = {
     "top_k": _i("CASES_TOP_K", 5),
-    # نفس ملاحظة السرعة يلي فوق
+    # تنطبق عليه ملاحظة الأداء المذكورة أعلاه.
     "hybrid_top_k": _i("CASES_HYBRID_TOP_K", 15),
-    # عتبة التشابه 0.0–1.0 (بترجع بالنتيجة كنسبة مئوية)
+    # عتبة التشابه 0.0–1.0، وتُعاد في النتيجة كنسبة مئوية.
     "threshold": _f("CASES_THRESHOLD", 0.50),
     "rerank_max_length": _i("CASES_RERANK_MAX_LENGTH", 2048),
     "encode_batch_size": _i("CASES_ENCODE_BATCH_SIZE", 32),
 }
 
 
-# ══════════════════ Part C — إصدار حكم أولي (Judgment) ══════════════════
+# إصدار الحكم الأولي
 
 CLASSIFIER_DIR = Path(os.getenv("CLASSIFIER_DIR", DATA_DIR / "classifier"))
 
 JUDGMENT_DEFAULTS = {
-    # كم مادة/سابقة تُمرَّر للـ LLM كسياق
+    # عدد المواد والسوابق المُمرَّرة إلى النموذج اللغوي كسياق.
     "top_k_laws": _i("JUDGMENT_TOP_K_LAWS", 5),
     "top_k_cases": _i("JUDGMENT_TOP_K_CASES", 3),
     "exclude_repealed_laws": _b("JUDGMENT_EXCLUDE_REPEALED", True),
     "min_law_score": _f("JUDGMENT_MIN_LAW_SCORE", 0.0),
     "case_threshold": _f("JUDGMENT_CASE_THRESHOLD", 0.45),
     "max_quote_words": _i("JUDGMENT_MAX_QUOTE_WORDS", 12),
-    # المصنّف الإحصائي (SVM) — بينشتغل بس إذا ملفات joblib موجودة بـ data/classifier
+    # المصنّف الإحصائي (SVM)؛ يعمل فقط عند توفّر ملفات joblib في data/classifier.
     "use_domain_classifier": _b("JUDGMENT_USE_CLASSIFIER", True),
     "top_k_classifier_labels": _i("JUDGMENT_TOP_K_CLASSIFIER_LABELS", 5),
     "classifier_min_score": _f("JUDGMENT_CLASSIFIER_MIN_SCORE", -1.0),
     "precedent_pool_size": _i("JUDGMENT_PRECEDENT_POOL_SIZE", 15),
-    # v2 — إعادة تنظيم الوقائع قبل الاسترجاع (استدعاء LLM إضافي)
+    # إعادة تنظيم الوقائع قبل الاسترجاع؛ تستهلك استدعاءً إضافياً للنموذج اللغوي.
     "use_fact_reorganization": _b("JUDGMENT_USE_FACT_REORG", True),
     "show_reorganized_facts_to_llm": _b("JUDGMENT_SHOW_REORG_TO_LLM", True),
     "fact_reorg_max_tokens": _i("JUDGMENT_FACT_REORG_MAX_TOKENS", 512),
-    # v3 — تمييز المواد المتشابهة لفظياً (استدعاء LLM لكل زوج)
+    # تمييز المواد المتشابهة لفظياً؛ تستهلك استدعاءً لكل زوج.
     "use_statute_discrimination": _b("JUDGMENT_USE_DISCRIMINATION", True),
     "confusable_overlap_threshold": _f("JUDGMENT_CONFUSABLE_OVERLAP", 0.15),
     "max_confusable_pairs": _i("JUDGMENT_MAX_CONFUSABLE_PAIRS", 3),
     "discrimination_max_tokens": _i("JUDGMENT_DISCRIMINATION_MAX_TOKENS", 400),
-    # الـ LLM
+    # النموذج اللغوي
     "groq_model": os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
     "max_output_tokens": _i("JUDGMENT_MAX_OUTPUT_TOKENS", 3072),
     "temperature": _f("JUDGMENT_TEMPERATURE", 0.1),
 }
 
-# ⚠️ المفتاح ما بينكتب بالكود أبداً — بينقرأ من .env فقط
+# لا تُكتب المفاتيح في الكود إطلاقاً؛ تُقرأ من .env حصراً.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 
-# ═══════════════════ Part D — RAG نماذج العقود (Contracts) ═══════════════════
+# نماذج العقود
 
 CONTRACTS_DIR = Path(os.getenv("CONTRACTS_DIR", DATA_DIR / "contracts"))
 CONTRACTS_SOURCE_JSON = str(os.getenv(
@@ -169,21 +167,20 @@ CONTRACTS_INDEX_FILE = str(os.getenv("CONTRACTS_INDEX_FILE", CONTRACTS_DIR / "co
 CONTRACTS_METADATA_FILE = str(os.getenv(
     "CONTRACTS_METADATA_FILE", CONTRACTS_DIR / "contracts_meta.pkl"))
 
-# النوتبوك استعمل intfloat/multilingual-e5-large. الافتراضي هون نفس نموذج باقي
-# المشروع (BGE-M3) حتى ما ننزّل ~2.2GB زيادة ولا نحمّل نموذج تاني بالذاكرة —
-# نفس السبب يلي خلانا نعمل model_registry. إذا بدك تلتزمي بنموذج النوتبوك:
+# القيمة الافتراضية هي نموذج المشروع نفسه (BGE-M3) تفادياً لتحميل نموذج ثانٍ
+# في الذاكرة. للاعتماد على نموذج آخر:
 #     CONTRACTS_EMBEDDING_MODEL=intfloat/multilingual-e5-large
-# ⚠️ أي تغيير هون بيلزمه إعادة بناء الفهرس:
+# يستلزم أي تغيير هنا إعادة بناء الفهرس:
 #     python scripts/build_contracts_index.py --force
 CONTRACTS_EMBEDDING_MODEL = os.getenv("CONTRACTS_EMBEDDING_MODEL", EMBEDDING_MODEL)
 
 CONTRACTS_DEFAULTS = {
-    # كم نموذج عقد يرجع بقائمة المرشحين
+    # عدد نماذج العقود في قائمة المرشحين.
     "top_k": _i("CONTRACTS_TOP_K", 5),
-    # عتبة تشابه (cosine 0.0–1.0). 0.0 = بدون عتبة، متل النوتبوك
+    # عتبة تشابه cosine بين 0.0 و1.0. القيمة 0.0 تعني بلا عتبة.
     "min_score": _f("CONTRACTS_MIN_SCORE", 0.0),
-    # طبقة الـ LLM يلي بتقترح الأنسب من المرشحين (بتكلّف استدعاء Groq).
-    # false = بحث دلالي صرف بدون أي استدعاء LLM.
+    # طبقة النموذج اللغوي التي تقترح الأنسب من المرشحين؛ تستهلك استدعاءً واحداً.
+    # القيمة false تعني بحثاً دلالياً صرفاً بلا أي استدعاء.
     "suggest": _b("CONTRACTS_SUGGEST", True),
     "groq_model": os.getenv("CONTRACTS_GROQ_MODEL", os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")),
     "suggest_max_tokens": _i("CONTRACTS_SUGGEST_MAX_TOKENS", 200),
@@ -193,11 +190,11 @@ CONTRACTS_DEFAULTS = {
 CONTRACTS_BUILD_BATCH = _i("CONTRACTS_BUILD_BATCH", 16)
 
 
-# ═══════════════════════════════ إقلاع السيرفر ═══════════════════════════════
+# إقلاع الخادم
 
-# أي ميزات تُحمّل نماذجها عند الإقلاع بدل أول طلب.
-# فاضي (الافتراضي) = تحميل كسول → السيرفر بيقلع بثانية، وأول طلب لكل ميزة بياخد وقت.
-# مثال: WARMUP=laws,cases,search
+# الميزات التي تُحمَّل نماذجها عند الإقلاع بدل أول طلب.
+# القيمة الفارغة (الافتراضي) تعني تحميلاً كسولاً: يقلع الخادم فوراً ويستغرق أول
+# طلب لكل ميزة وقتاً أطول. مثال: WARMUP=laws,cases,search
 WARMUP = [s.strip() for s in os.getenv("WARMUP", "").split(",") if s.strip()]
 
 PORT = _i("PORT", 5000)
@@ -205,7 +202,7 @@ DEBUG = _b("DEBUG", True)
 
 
 def resolve_device() -> str:
-    """يحوّل DEVICE='auto' لقيمة فعلية."""
+    """يحوّل DEVICE='auto' إلى قيمة فعلية."""
     if DEVICE != "auto":
         return DEVICE
     try:
@@ -217,5 +214,5 @@ def resolve_device() -> str:
 
 
 def use_fp16() -> bool:
-    """fp16 على CPU بيعطي نتائج غلط/بطيئة — منسمحله بس على GPU."""
+    """fp16 يعطي نتائج خاطئة أو بطيئة على الـ CPU، فيُسمح به على الـ GPU فقط."""
     return USE_FP16 and resolve_device() == "cuda"

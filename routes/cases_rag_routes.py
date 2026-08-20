@@ -1,4 +1,4 @@
-# routes/cases_rag_routes.py — Part B: RAG السوابق القضائية
+# routes/cases_rag_routes.py — الاسترجاع الدلالي للسوابق القضائية
 from flask import Blueprint, jsonify, request
 
 import config
@@ -28,7 +28,7 @@ def search_cases():
     POST /api/legal/cases/search
     {
       "text": "وقائع القضية ...",
-      "top_k": 5,            // اختياري
+      "top_k": 5,            // جميع البارامترات اختيارية
       "hybrid_top_k": 15,
       "threshold": 0.5       // 0.0–1.0
     }
@@ -37,12 +37,13 @@ def search_cases():
     query_text = (data.get("text") or "").strip()
     if not query_text:
         return jsonify({"status": "error",
-                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن الـ JSON"}), 400
+                        "error": "يرجى إرسال حقل 'text' غير فارغ ضمن جسم الطلب."}), 400
 
     try:
         params = _coerce(data)
     except (TypeError, ValueError) as e:
-        return jsonify({"status": "error", "error": f"قيمة بارامتر غير صالحة: {e}"}), 400
+        return jsonify({"status": "error",
+                        "error": f"قيمة غير صالحة لأحد البارامترات: {e}"}), 400
 
     try:
         result = cases_rag.search_cases(query_text, **params)
@@ -50,7 +51,8 @@ def search_cases():
     except FileNotFoundError as e:
         return jsonify({"status": "error", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "error", "error": f"حدث خطأ غير متوقع: {e}"}), 500
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
 
 
 @cases_rag_bp.route("/cases/config", methods=["GET"])
