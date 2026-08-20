@@ -1,13 +1,13 @@
 # routes/legal_search_routes.py
 from flask import Blueprint, request, jsonify
-from services.law_and_jurisprudence_search import search_legal, warmup
+from services.law_and_jurisprudence_search import search_legal
 
 # 1. إنشاء Blueprint
 legal_search_bp = Blueprint('legal_search_bp', __name__)
 
-# 2. تحميل نماذج الـ Embedding/Re-ranker والفهارس مرة واحدة عند إقلاع السيرفر
-#    (وليس عند كل طلب — هذا هو نفس مبدأ تهيئة pipeline في legal_routes.py)
-warmup()
+# 2. النماذج والفهارس بتنحمّل مرة وحدة، بس **كسول** — أول ما يوصل أول طلب لهالمسار،
+#    مش عند الـ import. هيك السيرفر بيقلع فوراً وميزة ما بتستعمليها ما بتكلفك وقت.
+#    إذا بدك تحميل مسبق عند الإقلاع: حطّي WARMUP=search بملف .env
 
 VALID_MODES = (None, 'articles', 'jurisprudence', 'both')
 

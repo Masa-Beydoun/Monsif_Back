@@ -14,3 +14,11 @@ __pycache__/
 # VS Code / IDE settings
 .vscode/
 .idea/
+# HuggingFace model cache (~4.6GB — بتنزل مرة وحدة محلياً)
+.hf_cache/
+
+# فهارس مبنية (كبيرة — بتنبنى بـ scripts/build_*.py)
+data/laws/qdrant_db/
+
+# ملفات المصنّف (joblib) — انسخيها يدوياً من Drive
+data/classifier/*.joblib

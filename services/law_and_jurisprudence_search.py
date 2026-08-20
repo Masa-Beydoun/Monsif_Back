@@ -3,16 +3,17 @@ import pickle
 from typing import Dict, List, Callable, Optional
 
 import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from rank_bm25 import BM25Okapi
+
+import config
+from services import model_registry
 
 
 # ══════════════════════════════════════ الإعدادات ══════════════════════════════════════
 
-EMBEDDING_MODEL = "BAAI/bge-m3"
-RERANKER_MODEL  = "BAAI/bge-reranker-v2-m3"
-BASE_DIR = '/content/drive/MyDrive/Graduation_Project/Ijtihad Rag'
+EMBEDDING_MODEL = config.EMBEDDING_MODEL
+RERANKER_MODEL  = config.RERANKER_MODEL
+# كان مسار Google Drive تبع Colab — صار مسار محلي داخل المشروع.
+BASE_DIR = str(config.UTILS_DIR)
 
 
 ARTICLE_INDEX_FILE    = os.path.join(BASE_DIR, "legal_articles_index.faiss")
@@ -107,7 +108,7 @@ def detect_query_mode(query_text: str) -> str:
 class LegalVectorStore:
     """فهرس هجين (Dense FAISS + Sparse BM25) عام، يُحمَّل من القرص فقط في وضع الـ Backend."""
 
-    def __init__(self, text_builder: Callable[[Dict], str], model: SentenceTransformer):
+    def __init__(self, text_builder: Callable[[Dict], str], model):
         self.text_builder = text_builder
         self.model = model
         self.index = None
@@ -120,6 +121,8 @@ class LegalVectorStore:
             raise FileNotFoundError(f"لم يُعثر على ملف الفهرس: {idx_path}")
         if not os.path.exists(meta_path):
             raise FileNotFoundError(f"لم يُعثر على ملف البيانات الوصفية: {meta_path}")
+
+        import faiss
 
         self.index = faiss.read_index(idx_path)
         with open(meta_path, "rb") as f:
@@ -160,17 +163,14 @@ class LegalRAG:
     """
 
     def __init__(self):
-        print(f" تحميل نموذج الـ Embedding: {EMBEDDING_MODEL}")
-        shared_model = SentenceTransformer(EMBEDDING_MODEL)
-        shared_model.max_seq_length = 1024
-        print(" النموذج جاهز")
+        # النماذج مشتركة مع باقي الميزات عبر model_registry — ما بتنحمّل نسخة تانية.
+        shared_model = model_registry.get_dense_encoder(max_seq_length=1024)
 
         self.article_store = LegalVectorStore(text_builder=build_article_text, model=shared_model)
         self.juris_store   = LegalVectorStore(text_builder=build_jtihad_text, model=shared_model)
 
-        print(f" تحميل نموذج الـ Re-ranker: {RERANKER_MODEL}...")
-        self.reranker = CrossEncoder(RERANKER_MODEL, max_length=2048)
-        print(" نموذج الـ Re-ranker جاهز")
+        self.reranker = model_registry.get_reranker()
+        self.rerank_max_length = 2048
 
         self._ready = False
 
@@ -188,20 +188,20 @@ class LegalRAG:
             return []
 
         pairs = [[query_text, text_builder(c)] for c in candidates]
-        scores = self.reranker.predict(pairs)
+        scores = self.reranker.predict(pairs, max_length=self.rerank_max_length)
         if isinstance(scores, (float, np.float32)):
             scores = [scores]
 
         ranked = []
         for i, score in enumerate(scores):
             # حساب نسبة الـ Sigmoid
-          prob = float(1 / (1 + np.exp(-score)))  # Cast to native float
+            prob = float(1 / (1 + np.exp(-score)))
 
-          if prob <= threshold:
-              continue
+            if prob <= threshold:
+                continue
 
-          normalized = round(float(prob * 100), 2)  # Clean 2-decimal float
-          ranked.append(mapper(candidates[i], normalized))
+            normalized = round(float(prob * 100), 2)
+            ranked.append(mapper(candidates[i], normalized))
 
         ranked.sort(key=lambda x: x["similarity_score"], reverse=True)
         return ranked[:top_k]
