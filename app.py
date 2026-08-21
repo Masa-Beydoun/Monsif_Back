@@ -1,5 +1,5 @@
 import config
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 from routes.cases_rag_routes import cases_rag_bp
@@ -26,6 +26,16 @@ app.register_blueprint(contracts_bp, url_prefix="/api/legal")  # /contracts/sear
 app.register_blueprint(classification_bp, url_prefix="/api/legal")
 
 
+@app.route("/console")
+def console():
+    """واجهة اختبار نماذج العقود.
+
+    تُخدَّم من الخادم نفسه لا كملف منفصل: هكذا تصير الطلبات من نفس المصدر،
+    فلا مشكلة CORS ولا عنوان ثانٍ يُضبط، ويكفي الفريق رابط واحد للتجربة.
+    """
+    return send_from_directory(config.BASE_DIR / "static", "console.html")
+
+
 @app.route("/")
 def home():
     return jsonify(
@@ -40,6 +50,7 @@ def home():
                 "POST /api/legal/contracts/search": "RAG نماذج العقود + اقتراح الأنسب",
                 "POST /api/legal/contracts/get": "عرض نموذج عقد كامل بالـ doc_id",
                 "GET  /api/health": "حالة النماذج المحمّلة",
+                "GET  /console": "واجهة اختبار نماذج العقود بالمتصفح",
             },
         }
     )

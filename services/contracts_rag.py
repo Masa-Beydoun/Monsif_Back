@@ -301,35 +301,17 @@ class MissingAPIKey(RuntimeError):
     pass
 
 
-def _groq_client():
-    if not config.GROQ_API_KEY:
-        raise MissingAPIKey(
-            "GROQ_API_KEY غير مضبوط. أضيفيه لملف .env بجذر المشروع:\n"
-            "    GROQ_API_KEY=gsk_..."
-        )
-    from groq import Groq
-
-    return Groq(api_key=config.GROQ_API_KEY)
-
-
 SUGGEST_SYSTEM = (
     "أنت مساعد قانوني متخصص بتصنيف نماذج العقود السورية. "
     "مهمتك الوحيدة: اقتراح رقم النموذج الأنسب من قائمة مرشحين بناءً على طلب المستخدم. "
     "جوابك يجب أن يكون حصراً بصيغة JSON صحيحة بدون أي نص إضافي قبلها أو بعدها."
 )
 
+_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
-def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
-    """اقتراح النموذج اللغوي: {"choice": رقم أو None, "reason": "..."}.
 
-    لا يعيد العقد مباشرة؛ يقترح فحسب، ويبقى التأكيد النهائي للمستخدم.
-    """
-    if not candidates:
-        return {"choice": None, "reason": None}
-
-    p = dict(config.CONTRACTS_DEFAULTS)
-    p.update({k: v for k, v in kw.items() if v is not None})
-
+def _build_messages(user_query: str, candidates: List[Dict]) -> List[Dict]:
+    """رسائل الاقتراح؛ مشتركة بين كل المزوّدين كي يبقى السلوك واحداً."""
     candidates_text = "\n".join(
         f"{i + 1}. الفئة: {c['category']} | العنوان: {c['subject']}"
         for i, c in enumerate(candidates)
@@ -349,36 +331,141 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
 أجب بصيغة JSON فقط بهذا الشكل بالضبط:
 {{"choice": <رقم>, "reason": "<سبب الاختيار بجملة وحدة قصيرة بالعربي>"}}"""
 
-    messages = [
+    return [
         {"role": "system", "content": SUGGEST_SYSTEM},
         {"role": "user", "content": user_prompt},
     ]
 
-    try:
-        client = _groq_client()
-        kwargs = dict(
-            model=p["groq_model"],
-            messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=p["suggest_max_tokens"],
-            temperature=p["temperature"],
+
+# المزوّد: Groq (استدعاء API، بلا GPU)
+
+def _groq_client():
+    if not config.GROQ_API_KEY:
+        raise MissingAPIKey(
+            "GROQ_API_KEY غير مضبوط. أضيفيه لملف .env بجذر المشروع:\n"
+            "    GROQ_API_KEY=gsk_..."
         )
-        try:
-            # يعطّل وضع التفكير في نماذج Qwen3؛ غير مدعوم في كل النماذج.
-            response = client.chat.completions.create(reasoning_effort="none", **kwargs)
-        except Exception:
-            response = client.chat.completions.create(**kwargs)
-        raw = (response.choices[0].message.content or "").strip()
+    from groq import Groq
+
+    return Groq(api_key=config.GROQ_API_KEY)
+
+
+def _complete_groq(messages: List[Dict], p: Dict) -> str:
+    client = _groq_client()
+    kwargs = dict(
+        model=p["groq_model"],
+        messages=messages,
+        response_format={"type": "json_object"},
+        max_tokens=p["suggest_max_tokens"],
+        temperature=p["temperature"],
+    )
+    try:
+        # يعطّل وضع التفكير في نماذج Qwen3؛ غير مدعوم في كل النماذج.
+        response = client.chat.completions.create(reasoning_effort="none", **kwargs)
+    except Exception:
+        response = client.chat.completions.create(**kwargs)
+    return (response.choices[0].message.content or "").strip()
+
+
+# المزوّد: أوزان محلية عبر transformers (Llama 3.1 وغيره)
+
+_hf_pipe = None          # (tokenizer, model)
+_hf_lock = threading.Lock()
+
+
+def _get_hf_model(model_name: str):
+    """تحميل كسول بنسخة واحدة. الأوزان ضخمة (~16GB لـ Llama-3.1-8B بدقة fp16)
+    فلا تُحمَّل إلا عند أول اقتراح فعلي، وتبقى محمّلة بعدها."""
+    global _hf_pipe
+    if _hf_pipe is None:
+        with _hf_lock:
+            if _hf_pipe is None:
+                import torch
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+
+                on_gpu = config.resolve_device() == "cuda"
+                # bfloat16 هو النطاق الذي دُرِّبت عليه Llama 3.1؛ fp16 يفيض في
+                # بعض التنشيطات. يُستعمل fp16 فقط على بطاقة لا تدعم bf16.
+                if on_gpu:
+                    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                else:
+                    dtype = torch.float32
+
+                t0 = time.time()
+                _log(f"تحميل النموذج اللغوي محلياً: {model_name} ({dtype}) ...")
+                tok = AutoTokenizer.from_pretrained(model_name, token=config.HF_TOKEN or None)
+                mdl = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    token=config.HF_TOKEN or None,
+                    torch_dtype=dtype,
+                    device_map="auto" if on_gpu else None,
+                    low_cpu_mem_usage=True,
+                )
+                if not on_gpu:
+                    mdl.to("cpu")
+                mdl.eval()
+                _hf_pipe = (tok, mdl)
+                _log(f"جاهز ({time.time() - t0:.1f}s)")
+    return _hf_pipe
+
+
+def _complete_hf(messages: List[Dict], p: Dict) -> str:
+    import torch
+
+    tok, mdl = _get_hf_model(p["hf_model"])
+    text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tok([text], return_tensors="pt").to(mdl.device)
+
+    with torch.no_grad():
+        out = mdl.generate(
+            **inputs,
+            max_new_tokens=p["suggest_max_tokens"],
+            do_sample=False,                    # حتمي: المهمة اختيار رقم لا توليد حر
+            pad_token_id=tok.eos_token_id,
+        )
+    return tok.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+
+
+_BACKENDS = {"groq": _complete_groq, "hf": _complete_hf}
+
+
+def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
+    """اقتراح النموذج اللغوي: {"choice": رقم أو None, "reason": "..."}.
+
+    لا يعيد العقد مباشرة؛ يقترح فحسب، ويبقى التأكيد النهائي للمستخدم.
+    """
+    if not candidates:
+        return {"choice": None, "reason": None}
+
+    p = dict(config.CONTRACTS_DEFAULTS)
+    p.update({k: v for k, v in kw.items() if v is not None})
+
+    backend = str(p.get("llm_backend", "groq")).lower()
+    if backend == "none":
+        return {"choice": None, "reason": None, "backend": "none"}
+
+    complete = _BACKENDS.get(backend)
+    if complete is None:
+        return {"choice": None, "reason": None,
+                "error": f"مزوّد غير معروف: {backend} (المتاح: groq، hf، none)"}
+
+    model_used = p["hf_model"] if backend == "hf" else p["groq_model"]
+
+    try:
+        raw = complete(_build_messages(user_query, candidates), p)
         if not raw:
-            return {"choice": None, "reason": None,
-                    "error": "أعاد النموذج اللغوي محتوى فارغاً."}
-        parsed = json.loads(raw)
+            return {"choice": None, "reason": None, "backend": backend,
+                    "model": model_used, "error": "أعاد النموذج اللغوي محتوى فارغاً."}
+        # الأوزان المحلية لا تلتزم دائماً بوضع JSON، فيُستخرج أول كائن من الناتج.
+        m = _JSON_RE.search(raw)
+        parsed = json.loads(m.group() if m else raw)
     except MissingAPIKey:
         raise
     except json.JSONDecodeError as e:
-        return {"choice": None, "reason": None, "error": f"JSON غير صالح: {e}"}
+        return {"choice": None, "reason": None, "backend": backend,
+                "model": model_used, "error": f"JSON غير صالح: {e}"}
     except Exception as e:
-        return {"choice": None, "reason": None,
+        return {"choice": None, "reason": None, "backend": backend, "model": model_used,
                 "error": f"تعذّر الاتصال بخدمة النموذج اللغوي: {e}"}
 
     choice = parsed.get("choice")
@@ -388,7 +475,8 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
         choice = None
     # القيمة 0 تعني «لا مرشح مناسب»، وأي رقم خارج المدى يُعدّ فشلاً.
     if not choice or not (1 <= choice <= len(candidates)):
-        return {"choice": None, "reason": parsed.get("reason")}
+        return {"choice": None, "reason": parsed.get("reason"),
+                "backend": backend, "model": model_used}
 
     best = candidates[choice - 1]
     return {
@@ -396,6 +484,8 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
         "doc_id": best["doc_id"],
         "subject": best["subject"],
         "reason": parsed.get("reason"),
+        "backend": backend,
+        "model": model_used,
     }
 
 
@@ -403,6 +493,16 @@ def suggest_best_match(user_query: str, candidates: List[Dict], **kw) -> Dict:
 
 _instance: Optional[ContractsRAG] = None
 _init_lock = threading.Lock()
+
+
+def warmup_llm() -> None:
+    """تحميل مسبق للنموذج اللغوي المحلي. لا يفعل شيئاً مع مزوّد غير hf.
+
+    أوزان Llama-3.1-8B نحو 16GB ونقلها إلى الـ GPU يستغرق دقيقة أو أكثر، فتُحمَّل
+    عند إقلاع الخادم بدل أن يتحمّلها أول طلب اقتراح.
+    """
+    if config.CONTRACTS_LLM_BACKEND == "hf":
+        _get_hf_model(config.CONTRACTS_HF_MODEL)
 
 
 def warmup() -> None:

@@ -10,7 +10,10 @@ TUNABLE = {
     "top_k": int,
     "min_score": float,
     "suggest": bool,
+    # مزوّد النموذج اللغوي لهذا الطلب وحده: groq | hf | none
+    "llm_backend": str,
     "groq_model": str,
+    "hf_model": str,
     "suggest_max_tokens": int,
     "temperature": float,
 }

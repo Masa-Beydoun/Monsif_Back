@@ -174,6 +174,21 @@ CONTRACTS_METADATA_FILE = str(os.getenv(
 #     python scripts/build_contracts_index.py --force
 CONTRACTS_EMBEDDING_MODEL = os.getenv("CONTRACTS_EMBEDDING_MODEL", EMBEDDING_MODEL)
 
+# مزوّد النموذج اللغوي لطبقة الاقتراح:
+#   groq → استدعاء API (لا يحتاج GPU؛ يخدم Llama 3.1 وغيره)
+#   hf   → تحميل الأوزان محلياً بـ transformers (يحتاج GPU وHF_TOKEN للنماذج المقيّدة)
+#   none → تعطيل الاقتراح كلياً، بحث دلالي صرف
+CONTRACTS_LLM_BACKEND = os.getenv("CONTRACTS_LLM_BACKEND", "groq").strip().lower()
+
+# النموذج المُحمَّل محلياً عند CONTRACTS_LLM_BACKEND=hf.
+CONTRACTS_HF_MODEL = os.getenv("CONTRACTS_HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+
+# مطلوب لتنزيل النماذج المقيّدة الوصول (Llama 3.1 من Meta مثلاً).
+HF_TOKEN = os.getenv("HF_TOKEN", "") or os.getenv("HUGGING_FACE_HUB_TOKEN", "")
+if HF_TOKEN:
+    os.environ.setdefault("HF_TOKEN", HF_TOKEN)
+    os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", HF_TOKEN)
+
 CONTRACTS_DEFAULTS = {
     # عدد نماذج العقود في قائمة المرشحين.
     "top_k": _i("CONTRACTS_TOP_K", 5),
@@ -182,7 +197,10 @@ CONTRACTS_DEFAULTS = {
     # طبقة النموذج اللغوي التي تقترح الأنسب من المرشحين؛ تستهلك استدعاءً واحداً.
     # القيمة false تعني بحثاً دلالياً صرفاً بلا أي استدعاء.
     "suggest": _b("CONTRACTS_SUGGEST", True),
-    "groq_model": os.getenv("CONTRACTS_GROQ_MODEL", os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")),
+    "llm_backend": CONTRACTS_LLM_BACKEND,
+    # Llama 3.1 عبر Groq: لا يحتاج GPU، والمهمة هنا اختيار رقم من قائمة قصيرة.
+    "groq_model": os.getenv("CONTRACTS_GROQ_MODEL", "llama-3.1-8b-instant"),
+    "hf_model": CONTRACTS_HF_MODEL,
     "suggest_max_tokens": _i("CONTRACTS_SUGGEST_MAX_TOKENS", 200),
     "temperature": _f("CONTRACTS_TEMPERATURE", 0.1),
 }

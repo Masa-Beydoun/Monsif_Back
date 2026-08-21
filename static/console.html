@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>سجل نماذج العقود</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap">
+<style>
+/* ── الرموز اللونية ─────────────────────────────────────────────────────
+   الحبر النيلي مأخوذ من أختام الدوائر الرسمية، والأحمر العنّابي محجوز
+   حصراً لاقتراح النموذج اللغوي كي يبقى له وزن واحد في الصفحة. */
+:root {
+  --ground:      #EDEFF3;
+  --surface:     #FFFFFF;
+  --surface-alt: #F5F6F9;
+  --line:        #D8DCE4;
+  --line-soft:   #E7EAF0;
+  --ink:         #161A21;
+  --ink-muted:   #59616F;
+  --ink-faint:   #8A93A2;
+  --accent:      #2E4A7D;
+  --accent-soft: #E3E9F4;
+  --seal:        #8C2F39;
+  --seal-soft:   #F6E7E8;
+  --good:        #2F6B4F;
+  --warn:        #8A6320;
+  --shadow:      0 1px 2px rgba(22,26,33,.06), 0 8px 24px -12px rgba(22,26,33,.18);
+  --radius:      10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0E1218;
+    --surface:     #161B23;
+    --surface-alt: #1D232D;
+    --line:        #2B333F;
+    --line-soft:   #222A34;
+    --ink:         #E5E9F0;
+    --ink-muted:   #99A2B2;
+    --ink-faint:   #6E7787;
+    --accent:      #86A9E0;
+    --accent-soft: #1C2735;
+    --seal:        #DE99A0;
+    --seal-soft:   #2C1D20;
+    --good:        #77BC98;
+    --warn:        #D6AC63;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:      #0E1218;
+  --surface:     #161B23;
+  --surface-alt: #1D232D;
+  --line:        #2B333F;
+  --line-soft:   #222A34;
+  --ink:         #E5E9F0;
+  --ink-muted:   #99A2B2;
+  --ink-faint:   #6E7787;
+  --accent:      #86A9E0;
+  --accent-soft: #1C2735;
+  --seal:        #DE99A0;
+  --seal-soft:   #2C1D20;
+  --good:        #77BC98;
+  --warn:        #D6AC63;
+  --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+  font-weight: 400;
+}
+.ltr { direction: ltr; text-align: left; }
+.mono { font-family: "IBM Plex Mono", ui-monospace, "Courier New", monospace; }
+
+/* ── الهيكل ───────────────────────────────────────────────────────────── */
+.wrap { max-width: 1240px; margin: 0 auto; padding: 22px 20px 64px; }
+
+header.bar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding-bottom: 18px; margin-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; margin-inline-end: auto; }
+.brand h1 {
+  margin: 0; font-size: clamp(1.15rem, 2.6vw, 1.5rem); font-weight: 600;
+  letter-spacing: -.01em; text-wrap: balance;
+}
+.brand .sub { color: var(--ink-faint); font-size: .8rem; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); font-size: .76rem; color: var(--ink-muted);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+.dot.ok   { background: var(--good); }
+.dot.bad  { background: var(--seal); }
+.dot.busy { background: var(--warn); }
+
+button, select, input, textarea { font: inherit; color: inherit; }
+.btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: .82rem;
+  transition: background .14s ease, border-color .14s ease;
+}
+.btn:hover { background: var(--surface-alt); border-color: var(--ink-faint); }
+.btn:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible, .row:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.btn.primary {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500;
+}
+:root[data-theme="dark"] .btn.primary,
+:root:not([data-theme="light"]) .btn.primary { color: #0E1218; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .btn.primary { color: #fff; } }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+/* ── لوحة البحث ───────────────────────────────────────────────────────── */
+.panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.search { padding: 16px; display: flex; flex-direction: column; gap: 13px; }
+.search textarea {
+  width: 100%; min-height: 74px; resize: vertical;
+  padding: 11px 13px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface-alt); color: var(--ink);
+  line-height: 1.7;
+}
+.search textarea::placeholder { color: var(--ink-faint); }
+
+.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 18px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--ink-faint); font-weight: 500;
+}
+.field input, .field select {
+  padding: 6px 9px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--surface-alt); color: var(--ink);
+  font-size: .84rem;
+}
+.field input[type="number"] { width: 74px; font-variant-numeric: tabular-nums; }
+.field input[type="text"] { min-width: 260px; }
+.check { display: flex; align-items: center; gap: 7px; font-size: .84rem; padding-bottom: 6px; }
+.check input { width: 15px; height: 15px; accent-color: var(--accent); }
+.actions { display: flex; gap: 9px; margin-inline-start: auto; }
+
+.samples { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.samples span { font-size: .7rem; color: var(--ink-faint); letter-spacing: .05em; }
+.chip {
+  border: 1px dashed var(--line); background: transparent; color: var(--ink-muted);
+  padding: 3px 10px; border-radius: 999px; font-size: .76rem; cursor: pointer;
+}
+.chip:hover { border-style: solid; border-color: var(--accent); color: var(--accent); }
+
+/* ── التنبيهات ────────────────────────────────────────────────────────── */
+.note {
+  margin-top: 16px; padding: 12px 15px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--surface);
+  font-size: .86rem; display: flex; gap: 11px; align-items: flex-start;
+}
+.note .k { font-weight: 600; flex: none; }
+.note.err { border-color: var(--seal); background: var(--seal-soft); color: var(--seal); }
+.note.err .fix { color: var(--ink-muted); display: block; margin-top: 4px; font-size: .8rem; }
+.note pre { margin: 4px 0 0; white-space: pre-wrap; font-size: .78rem; }
+
+/* ── النتائج ──────────────────────────────────────────────────────────── */
+.grid { display: grid; gap: 18px; margin-top: 18px; grid-template-columns: 1fr; }
+@media (min-width: 1000px) { .grid { grid-template-columns: minmax(360px, 27rem) 1fr; } }
+
+.col-head {
+  display: flex; align-items: baseline; gap: 9px; margin-bottom: 10px;
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-faint); font-weight: 500;
+}
+.col-head .count { font-variant-numeric: tabular-nums; color: var(--ink-muted); }
+
+/* اقتراح النموذج اللغوي — اللون العنّابي محجوز له وحده */
+.suggest {
+  border: 1px solid var(--seal); background: var(--seal-soft);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px;
+}
+.suggest .hd {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--seal); font-weight: 600;
+}
+.suggest .why { font-size: .87rem; color: var(--ink); line-height: 1.6; }
+.suggest .via {
+  margin-top: 7px; font-size: .7rem; color: var(--ink-muted);
+  border-top: 1px solid color-mix(in srgb, var(--seal) 25%, transparent); padding-top: 6px;
+}
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+.row {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
+  padding: 12px 14px; text-align: start;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); cursor: pointer; width: 100%;
+  transition: border-color .14s ease, background .14s ease;
+}
+.row:hover { border-color: var(--accent); background: var(--surface-alt); }
+.row[aria-current="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.row.picked { border-color: var(--seal); }
+/* الترقيم هنا يعني الرتبة بعد الترتيب بالتشابه، لا مجرد تعداد */
+.rank {
+  grid-row: 1 / span 3; align-self: start;
+  width: 26px; height: 26px; border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: .78rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.row.picked .rank { background: var(--seal-soft); color: var(--seal); }
+.subject { font-weight: 500; line-height: 1.45; text-wrap: balance; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: .74rem; color: var(--ink-muted); }
+.cat {
+  background: var(--surface-alt); border: 1px solid var(--line-soft);
+  padding: 1px 8px; border-radius: 999px;
+}
+.scorebar { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.track { flex: 1; height: 3px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
+.fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.scoreval { font-size: .72rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+/* ── العقد ────────────────────────────────────────────────────────────── */
+.doc { padding: 0; overflow: hidden; }
+.doc-head {
+  padding: 15px 18px; border-bottom: 1px solid var(--line); background: var(--surface-alt);
+  display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
+}
+.doc-head h2 { margin: 0; font-size: 1.02rem; font-weight: 600; line-height: 1.45; text-wrap: balance; }
+.doc-head .facts {
+  display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 6px;
+  font-size: .73rem; color: var(--ink-muted);
+}
+.doc-head .facts b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.doc-head .tools { margin-inline-start: auto; display: flex; gap: 7px; }
+
+/* متن العقد بخط نسخي — يقرأ كوثيقة لا كواجهة */
+.doc-body {
+  padding: 22px 26px 30px; max-height: 62vh; overflow: auto;
+  font-family: Amiri, "Times New Roman", serif;
+  font-size: 1.08rem; line-height: 2.05; white-space: pre-wrap;
+  word-break: break-word;
+}
+.ph {
+  display: inline-block; min-width: 46px; text-align: center;
+  border-bottom: 1.5px solid var(--accent); color: var(--accent);
+  background: var(--accent-soft); border-radius: 3px 3px 0 0;
+  padding: 0 5px; margin: 0 2px; font-family: "IBM Plex Sans Arabic", sans-serif;
+  font-size: .72rem; line-height: 1.7; vertical-align: baseline;
+}
+.empty {
+  padding: 44px 26px; text-align: center; color: var(--ink-faint); font-size: .88rem;
+}
+.empty .big { font-size: 1.6rem; color: var(--line); display: block; margin-bottom: 8px; }
+
+.foot {
+  margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line);
+  font-size: .74rem; color: var(--ink-faint);
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+}
+.foot code {
+  font-family: "IBM Plex Mono", monospace; font-size: .72rem;
+  background: var(--surface-alt); border: 1px solid var(--line-soft);
+  padding: 1px 6px; border-radius: 4px; direction: ltr; display: inline-block;
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="bar">
+    <div class="brand">
+      <h1>سجل نماذج العقود</h1>
+      <span class="sub">واجهة اختبار الاسترجاع الدلالي</span>
+    </div>
+    <span class="pill" id="health"><span class="dot" id="healthDot"></span><span id="healthTxt">جارِ الفحص…</span></span>
+    <button class="btn" id="themeBtn" type="button">تبديل السمة</button>
+  </header>
+
+  <section class="panel search">
+    <textarea id="q" placeholder="اكتب بلغة بسيطة شو نوع العقد الي بدك ياه — مثلاً: بدي أأجّر محل تجاري بالسوق لمدة ٣ سنين"></textarea>
+
+    <div class="samples">
+      <span>جرّب:</span>
+      <button class="chip" type="button">بدي أأجّر محل تجاري لمدة ٣ سنين</button>
+      <button class="chip" type="button">بدي وظّف موظف بالشركة بعقد سنة</button>
+      <button class="chip" type="button">بدي بيع سيارتي لشخص تاني</button>
+      <button class="chip" type="button">بدي أوكّل محامي يترافع عني</button>
+      <button class="chip" type="button">بدي أرهن بيتي مقابل قرض</button>
+    </div>
+
+    <div class="controls">
+      <div class="field">
+        <label for="topk">عدد المرشحين</label>
+        <input id="topk" type="number" min="1" max="20" value="5" dir="ltr">
+      </div>
+      <div class="field">
+        <label for="minscore">أدنى تشابه</label>
+        <input id="minscore" type="number" min="0" max="1" step="0.05" value="0" dir="ltr">
+      </div>
+      <div class="field">
+        <label for="backend">طبقة الاقتراح</label>
+        <select id="backend">
+          <option value="">الافتراضي من الخادم</option>
+          <option value="groq">Groq — Llama 3.1</option>
+          <option value="hf">أوزان محلية — Llama 3.1</option>
+          <option value="none">بلا اقتراح</option>
+        </select>
+      </div>
+      <label class="check"><input id="suggest" type="checkbox" checked> اقتراح الأنسب</label>
+      <div class="field">
+        <label for="base">عنوان الخادم</label>
+        <input id="base" type="text" class="ltr" placeholder="(نفس المصدر)" dir="ltr">
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="go" type="button">ابحث</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="alert"></div>
+
+  <div class="grid">
+    <section>
+      <div class="col-head"><span>المرشحون</span><span class="count" id="cnt"></span></div>
+      <div id="suggestBox"></div>
+      <div class="list" id="list">
+        <div class="panel empty"><span class="big">◇</span>اكتب طلبك فوق واضغط «ابحث» لعرض أقرب النماذج.</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="col-head"><span>النموذج الكامل</span><span class="count" id="docid"></span></div>
+      <article class="panel doc" id="doc">
+        <div class="empty"><span class="big">▤</span>اختر نموذجاً من قائمة المرشحين لعرض نصه كاملاً.</div>
+      </article>
+    </section>
+  </div>
+
+  <div class="foot">
+    <span>البحث <code>POST /api/legal/contracts/search</code></span>
+    <span>النص الكامل <code>POST /api/legal/contracts/get</code></span>
+    <span>الإعدادات <code>GET /api/legal/contracts/config</code></span>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const LS = "monsif.console";
+
+  // ── السمة ──────────────────────────────────────────────────────────────
+  const savedTheme = localStorage.getItem(LS + ".theme");
+  if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
+  $("themeBtn").addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const isDark = cur ? cur === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = isDark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem(LS + ".theme", next);
+  });
+
+  // ── عنوان الخادم ───────────────────────────────────────────────────────
+  // فارغ = نفس مصدر الصفحة، وهو الوضع الطبيعي لأن Flask هو من يخدمها.
+  $("base").value = localStorage.getItem(LS + ".base") || "";
+  $("base").addEventListener("change", () => {
+    localStorage.setItem(LS + ".base", $("base").value.trim().replace(/\/+$/, ""));
+    checkHealth();
+  });
+  const api = (path) => ($("base").value.trim().replace(/\/+$/, "")) + path;
+
+  async function post(path, body) {
+    const r = await fetch(api(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* رد غير JSON */ }
+    if (!r.ok) {
+      const err = new Error((data && data.error) || ("HTTP " + r.status));
+      err.status = r.status;
+      throw err;
+    }
+    return data;
+  }
+
+  // ── حالة الخادم ────────────────────────────────────────────────────────
+  async function checkHealth() {
+    const dot = $("healthDot"), txt = $("healthTxt");
+    dot.className = "dot busy"; txt.textContent = "جارِ الفحص…";
+    try {
+      const r = await fetch(api("/api/legal/contracts/config"));
+      const j = await r.json();
+      const d = j.data || {};
+      dot.className = "dot ok";
+      txt.textContent = d.loaded
+        ? ((d.total_contracts || 0) + " نموذج · " + (d.defaults && d.defaults.llm_backend || "—"))
+        : "الخادم يعمل · الفهرس غير محمّل بعد";
+    } catch (e) {
+      dot.className = "dot bad";
+      txt.textContent = "تعذّر الوصول للخادم";
+    }
+  }
+
+  // ── التنبيهات ──────────────────────────────────────────────────────────
+  function clearAlert() { $("alert").innerHTML = ""; }
+  function showError(e) {
+    // كل رسالة تقول شو صار وشو الحل، لا مجرد رقم خطأ.
+    let fix = "";
+    if (e.status === 503 && /GROQ_API_KEY/.test(e.message)) {
+      fix = "أضف المفتاح إلى الخادم، أو أوقف «اقتراح الأنسب» للبحث الدلالي وحده.";
+    } else if (e.status === 503) {
+      fix = "فهرس العقود غير جاهز على الخادم. شغّل scripts/import_contracts_index.py ثم أعد التشغيل.";
+    } else if (e.status === 404) {
+      fix = "المعرّف غير موجود في الفهرس الحالي.";
+    } else if (!e.status) {
+      fix = "تأكد أن الخادم يعمل وأن «عنوان الخادم» صحيح.";
+    }
+    $("alert").innerHTML =
+      '<div class="note err"><span class="k">تعذّر التنفيذ</span><span>' +
+      esc(e.message) + (fix ? '<span class="fix">' + esc(fix) + "</span>" : "") +
+      "</span></div>";
+  }
+
+  const esc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+  // ── البحث ──────────────────────────────────────────────────────────────
+  let results = [];
+  let suggestedId = null;
+
+  async function search() {
+    const text = $("q").value.trim();
+    if (!text) { $("q").focus(); return; }
+
+    clearAlert();
+    $("go").disabled = true;
+    $("go").textContent = "جارِ البحث…";
+    $("list").innerHTML = '<div class="panel empty">جارِ البحث…</div>';
+    $("suggestBox").innerHTML = "";
+    $("cnt").textContent = "";
+
+    const body = {
+      text: text,
+      top_k: Number($("topk").value) || 5,
+      min_score: Number($("minscore").value) || 0,
+      suggest: $("suggest").checked,
+    };
+    // «الافتراضي من الخادم» يعني ألّا نرسل الحقل أصلاً.
+    if ($("backend").value) body.llm_backend = $("backend").value;
+
+    try {
+      const res = await post("/api/legal/contracts/search", body);
+      const d = res.data || {};
+      results = d.results || [];
+      suggestedId = (d.suggestion && d.suggestion.doc_id) || null;
+      renderSuggestion(d.suggestion, d.took_ms);
+      renderList(results);
+      $("cnt").textContent = results.length + " نتيجة · " + (d.took_ms || 0) + " م.ث";
+      if (!results.length) {
+        $("list").innerHTML = '<div class="panel empty">' +
+          esc(d.message || "لا توجد نماذج مطابقة.") + "</div>";
+      }
+    } catch (e) {
+      $("list").innerHTML = '<div class="panel empty">لم تُعرض نتائج.</div>';
+      showError(e);
+    } finally {
+      $("go").disabled = false;
+      $("go").textContent = "ابحث";
+    }
+  }
+
+  function renderSuggestion(s, ms) {
+    if (!s) { $("suggestBox").innerHTML = ""; return; }
+    if (s.error) {
+      $("suggestBox").innerHTML =
+        '<div class="note"><span class="k">تعذّر الاقتراح</span><span>' +
+        esc(s.error) + " — المرشحون أدناه مرتّبون بالتشابه الدلالي.</span></div>";
+      return;
+    }
+    if (!s.choice) {
+      $("suggestBox").innerHTML =
+        '<div class="note"><span class="k">بلا ترجيح</span><span>' +
+        esc(s.reason || "لم يرجّح النموذج اللغوي أي مرشح؛ اختر بنفسك من القائمة.") +
+        "</span></div>";
+      return;
+    }
+    $("suggestBox").innerHTML =
+      '<div class="suggest">' +
+        '<div class="hd">الأنسب — المرشح رقم ' + esc(s.choice) + "</div>" +
+        '<div class="why"><strong>' + esc(s.subject || "") + "</strong>" +
+          (s.reason ? " — " + esc(s.reason) : "") + "</div>" +
+        '<div class="via">' + esc(s.model || "") +
+          (s.backend ? " · " + esc(s.backend) : "") + "</div>" +
+      "</div>";
+  }
+
+  function renderList(rows) {
+    const html = rows.map(function (r, i) {
+      const pct = Math.max(0, Math.min(100, Math.round((r.score || 0) * 100)));
+      const picked = suggestedId && r.doc_id === suggestedId;
+      return '<button class="row' + (picked ? " picked" : "") + '" type="button" ' +
+        'data-id="' + esc(r.doc_id) + '">' +
+        '<span class="rank">' + (i + 1) + "</span>" +
+        '<span class="subject">' + esc(r.subject) + "</span>" +
+        '<span class="meta"><span class="cat">' + esc(r.category) + "</span>" +
+          "<span>" + (r.placeholders_count || 0) + " حقل للتعبئة</span></span>" +
+        '<span class="scorebar"><span class="track">' +
+          '<span class="fill" style="width:' + pct + '%"></span></span>' +
+          '<span class="scoreval mono">' + (r.score || 0).toFixed(3) + "</span></span>" +
+        "</button>";
+    }).join("");
+    $("list").innerHTML = html;
+    Array.prototype.forEach.call($("list").querySelectorAll(".row"), function (el) {
+      el.addEventListener("click", function () { openDoc(el.dataset.id, el); });
+    });
+    if (suggestedId) {
+      const pick = $("list").querySelector('.row[data-id="' + CSS.escape(suggestedId) + '"]');
+      if (pick) openDoc(suggestedId, pick);
+    }
+  }
+
+  // ── عرض العقد ──────────────────────────────────────────────────────────
+  async function openDoc(id, el) {
+    Array.prototype.forEach.call($("list").querySelectorAll(".row"), function (r) {
+      r.setAttribute("aria-current", r === el ? "true" : "false");
+    });
+    $("doc").innerHTML = '<div class="empty">جارِ التحميل…</div>';
+    try {
+      // POST لا GET: كل المعرّفات تحتوي «#» وهو محرف تجزئة في الروابط.
+      const res = await post("/api/legal/contracts/get", { doc_id: id });
+      const c = res.data || {};
+      $("docid").textContent = c.doc_id || "";
+      $("doc").innerHTML =
+        '<div class="doc-head">' +
+          "<div><h2>" + esc(c.subject) + "</h2>" +
+            '<div class="facts"><span>' + esc(c.category) + "</span>" +
+              "<span>حقول للتعبئة <b>" + (c.placeholders_count || 0) + "</b></span>" +
+              "<span>عدد المحارف <b>" + ((c.raw_body || "").length) + "</b></span></div></div>" +
+          '<div class="tools"><button class="btn" id="copyBtn" type="button">نسخ النص</button></div>' +
+        "</div>" +
+        '<div class="doc-body" id="docBody"></div>';
+      // الفراغات «___» تُبرز كحقول قابلة للتعبئة بعد تهريب النص.
+      $("docBody").innerHTML = esc(c.raw_body || "")
+        .replace(/_{3,}/g, '<span class="ph">حقل</span>');
+      $("copyBtn").addEventListener("click", function () {
+        navigator.clipboard.writeText(c.raw_body || "").then(function () {
+          $("copyBtn").textContent = "نُسخ";
+          setTimeout(function () { $("copyBtn").textContent = "نسخ النص"; }, 1600);
+        });
+      });
+    } catch (e) {
+      $("doc").innerHTML = '<div class="empty">تعذّر عرض النموذج.</div>';
+      showError(e);
+    }
+  }
+
+  // ── الربط ──────────────────────────────────────────────────────────────
+  $("go").addEventListener("click", search);
+  $("q").addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") search();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (c) {
+    c.addEventListener("click", function () { $("q").value = c.textContent.trim(); search(); });
+  });
+  checkHealth();
+})();
+</script>
+</body>
+</html>
