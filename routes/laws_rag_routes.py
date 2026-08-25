@@ -12,6 +12,8 @@ TUNABLE = {
     "hybrid_top_k": int,
     "exclude_repealed": bool,
     "min_score": float,
+    "min_score_ratio": float,
+    "score_drop_ratio": float,
     "with_dependencies": bool,
     "dep_depth": int,
     "dep_max": int,

@@ -1,0 +1,3 @@
+query,query_type,expected_article_ids,is_negative
+السرقة الموصوفة,keyword,LAW_ID:635|LAW_ID:636,0
+ما حكم شراء عملة رقمية عبر الإنترنت,sentence,,1

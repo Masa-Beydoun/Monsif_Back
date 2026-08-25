@@ -85,8 +85,14 @@ LAWS_DEFAULTS = {
     "hybrid_top_k": _i("LAWS_HYBRID_TOP_K", 15),
     # استبعاد المواد الملغاة من النتائج
     "exclude_repealed": _b("LAWS_EXCLUDE_REPEALED", False),
-    # عتبة الامتناع: تُستبعد أي نتيجة دون هذا الرقم. 0.0 يعني بلا عتبة.
-    "min_score": _f("LAWS_MIN_SCORE", 0.0),
+    # عتبة الامتناع المطلقة: تُستبعد أي نتيجة دون هذا الرقم. 0.0 يعني بلا عتبة.
+    "min_score": _f("LAWS_MIN_SCORE", 0.05),
+    # عتبة نسبية إلى أعلى نتيجة: تُستبعد أي مادة تقل عن (النسبة × أعلى نتيجة).
+    # تتكيّف مع الاستعلام: البحث القوي يرفع العتبة والضعيف يخفضها. 0 = معطّلة.
+    "min_score_ratio": _f("LAWS_MIN_SCORE_RATIO", 0.15),
+    # قصّ الذيل عند أول هبوط حاد: إذا كانت نتيجة مادة أقل من (النسبة × النتيجة
+    # التي قبلها) تُقصّ هي وكل ما بعدها. 0 = معطّل. تُبقي المادة الأولى دائماً.
+    "score_drop_ratio": _f("LAWS_SCORE_DROP_RATIO", 0.5),
     # دمج المواد المرتبطة (dependency merge)
     "with_dependencies": _b("LAWS_WITH_DEPENDENCIES", True),
     "dep_depth": _i("LAWS_DEP_DEPTH", 2),
@@ -145,15 +151,64 @@ JUDGMENT_DEFAULTS = {
     # تمييز المواد المتشابهة لفظياً؛ تستهلك استدعاءً لكل زوج.
     "use_statute_discrimination": _b("JUDGMENT_USE_DISCRIMINATION", True),
     "confusable_overlap_threshold": _f("JUDGMENT_CONFUSABLE_OVERLAP", 0.15),
+    # 40 = مطابقة النوتبوك؛ 0 = مقارنة المتن كامل. انظر JudgmentConfig.
+    "confusable_window_words": _i("JUDGMENT_CONFUSABLE_WINDOW", 40),
+    # مفتاحا الخروج عن سلوك النوتبوك؛ الافتراضي false في الاثنين.
+    "confusable_scan_cited_articles": _b("JUDGMENT_SCAN_CITED_ARTICLES", False),
+    "precedent_key_by_uid": _b("JUDGMENT_PRECEDENT_KEY_BY_UID", False),
+    "strict_citation_law_match": _b("JUDGMENT_STRICT_CITATIONS", False),
     "max_confusable_pairs": _i("JUDGMENT_MAX_CONFUSABLE_PAIRS", 3),
     "discrimination_max_tokens": _i("JUDGMENT_DISCRIMINATION_MAX_TOKENS", 400),
-    # النموذج اللغوي
-    "groq_model": os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+    # النموذج اللغوي: فارغ = يرث الافتراضي العام أدناه (LLM_BACKEND / HF_MODEL).
+    "llm_backend": os.getenv("JUDGMENT_LLM_BACKEND", ""),
+    "llm_model": os.getenv("JUDGMENT_LLM_MODEL", ""),
+    # مهمل: بقي للتوافق مع الطلبات القديمة، ويُستعمل فقط مع الواجهة groq.
+    "groq_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     "max_output_tokens": _i("JUDGMENT_MAX_OUTPUT_TOKENS", 3072),
     "temperature": _f("JUDGMENT_TEMPERATURE", 0.1),
 }
 
+
+# النموذج اللغوي (مشترك بين الحكم الأولي ونماذج العقود)
+
+# hf = HuggingFace Inference Providers (استدعاء API، بلا تنزيل أوزان)
+# groq = Groq API
+LLM_BACKEND = os.getenv("LLM_BACKEND", "hf").strip().lower()
+
+# مسار الـ router المتوافق مع OpenAI؛ يخدم نماذج Meta Llama المقيّدة الوصول
+# متى مُنحت للحساب موافقة على مستودعها.
+HF_BASE_URL = os.getenv("HF_BASE_URL", "https://router.huggingface.co/v1")
+# Llama-3.1-8B لا يلتزم بصيغة الإخراج في هذه المهمة: يقتبس المادة كاملة بدل
+# اقتباس ركن قصير، ويكتب article_id ناقصاً، ويختار 657 خلافاً لكل السوابق
+# المرفقة — فيسقط fully_grounded. النموذج الأكبر يجتاز التحقق كاملاً وهو أسرع
+# عملياً. Llama-3.1-70B غير مخدوم على المزوّدين، لذلك 3.3.
+HF_MODEL = os.getenv("HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+
+# الواجهة الاحتياطية: تُجرَّب مرة واحدة عندما تفشل الأساسية فشلاً يستحق التحويل
+# (نفاد حصة 402، تجاوز معدل 429، تعطّل المزوّد 5xx، مفتاح تالف، شبكة مقطوعة).
+# أخطاء الطلب نفسه (400/422) لا تُحوَّل لأنها ستتكرر عند أي مزوّد.
+# واجهتان متوافقتان مع OpenAI، تأكّد وصولهما من شبكة المشروع (بخلاف Groq).
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+GEMINI_BASE_URL = os.getenv(
+    "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+LLM_ENABLE_FALLBACK = _b("LLM_ENABLE_FALLBACK", True)
+LLM_FALLBACK_BACKEND = os.getenv("LLM_FALLBACK_BACKEND", "groq").strip().lower()
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "qwen/qwen3.6-27b")
+
+# مهلة الاستدعاء بالثواني، وعدد المحاولات عند 429/503 (إقلاع النموذج أو الحصة).
+LLM_TIMEOUT = _i("LLM_TIMEOUT", 120)
+LLM_MAX_RETRIES = _i("LLM_MAX_RETRIES", 3)
+
 # لا تُكتب المفاتيح في الكود إطلاقاً؛ تُقرأ من .env حصراً.
+HF_TOKEN = os.getenv("HF_TOKEN", "") or os.getenv("HUGGINGFACE_TOKEN", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 

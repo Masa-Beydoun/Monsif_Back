@@ -1,0 +1,668 @@
+{
+  "info": {
+    "name": "Monsif_Back — Syrian Legal AI API",
+    "description": "Flask backend. Every response is wrapped: {\"status\":\"success\",\"data\":{...}} or {\"status\":\"error\",\"error\":\"...\"}. Arabic is returned raw (ensure_ascii=False). Set the baseUrl variable to your server.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:5000"
+    },
+    {
+      "key": "doc_id",
+      "value": ""
+    },
+    {
+      "key": "law_id",
+      "value": "مرسوم تشريعي رقم 148 لعام 1949 - قانون العقوبات العام"
+    },
+    {
+      "key": "article_id",
+      "value": "مرسوم تشريعي رقم 148 لعام 1949 - قانون العقوبات العام:622"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. System",
+      "item": [
+        {
+          "name": "GET / — endpoint index",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Static list of available endpoints. Useful as a liveness probe."
+          }
+        },
+        {
+          "name": "GET /api/health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Which models and features are currently loaded. Models load lazily on the first request per feature, so poll this to drive a 'warming up' state in the UI."
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Summarization",
+      "item": [
+        {
+          "name": "POST /api/legal/summarize",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"بتاريخ 12/05/2023 تقدم المدعي بشكوى ضد المتهم الأول، حيث أفاد أن المتهم قام بكسر باب منزله ليلاً وسرقة مبلغ مالي قدره خمسمئة ألف ليرة. وقد اعترف المتهم أمام النيابة العامة بارتكاب الفعل، وتم ضبط أداة الكسر وبصمات على الباب. وقررت المحكمة إدانة المتهم.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/summarize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "summarize"
+              ]
+            },
+            "description": "Extractive summary + regex-extracted fields. Fast, no neural models, no API key. Text must be at least 10 characters."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Crime classification",
+      "item": [
+        {
+          "name": "POST /api/legal/classify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"facts\": \"أقدم المتهم على سرقة مبلغ مالي من منزل المجني عليه بعد كسر الباب ليلاً واستعمال أداة حادة\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/classify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "classify"
+              ]
+            },
+            "description": "Multi-label SVM over the facts. Note the field is 'facts', not 'text'. Returns classified:false with an explanatory message when no label passes the decision threshold — that is a 200, not an error."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Legacy search (articles + jurisprudence)",
+      "item": [
+        {
+          "name": "POST /api/legal/search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"السرقة الموصوفة\",\n  \"top_k\": 3,\n  \"mode\": \"both\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "search"
+              ]
+            },
+            "description": "Older FAISS index over articles and jurisprudence. mode: 'articles' | 'jurisprudence' | 'both', or omit to auto-detect from the query. Prefer /laws/search for new work."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Laws catalog (browse)",
+      "item": [
+        {
+          "name": "GET /api/legal/laws — all laws",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/laws",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "laws"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "العقوبات",
+                  "disabled": true,
+                  "description": "Filter by law name substring"
+                },
+                {
+                  "key": "category",
+                  "value": "تشريعات العفو العام",
+                  "disabled": true,
+                  "description": "Filter by law category"
+                }
+              ]
+            },
+            "description": "All 25 laws with article counts, internal category counts and a status breakdown. Reads the JSONL corpus only — no models, no Qdrant, instant. Also returns a 'categories' roll-up you can use as a top-level browse view."
+          }
+        },
+        {
+          "name": "GET /api/legal/laws/:law_id/articles — articles of a law",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/laws/{{law_id}}/articles?include_body=false",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "laws",
+                "{{law_id}}",
+                "articles"
+              ],
+              "query": [
+                {
+                  "key": "include_body",
+                  "value": "false",
+                  "description": "false shrinks the largest law from 1.9MB to 1.2MB"
+                },
+                {
+                  "key": "grouped",
+                  "value": "true",
+                  "disabled": true,
+                  "description": "Group into the law's internal categories (default true)"
+                },
+                {
+                  "key": "status",
+                  "value": "ملغاة",
+                  "disabled": true,
+                  "description": "عادية | معدلة | ملغاة"
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Exact category_key from a previous response"
+                },
+                {
+                  "key": "q",
+                  "value": "السرقة",
+                  "disabled": true,
+                  "description": "Search article number or body"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "50",
+                  "disabled": true,
+                  "description": "Omit to get every article"
+                }
+              ]
+            },
+            "description": "Every article of one law with all its info, grouped into that law's internal كتاب/باب/فصل categories. Set the law_id collection variable from the /laws response — it contains Arabic and spaces, so URL-encode it. Accepts the law_id, the full law_name, or the short_name."
+          }
+        },
+        {
+          "name": "GET /api/legal/laws/articles?law_id= — query-param variant",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/laws/articles?law_id={{law_id}}&include_body=false",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "laws",
+                "articles"
+              ],
+              "query": [
+                {
+                  "key": "law_id",
+                  "value": "{{law_id}}"
+                },
+                {
+                  "key": "include_body",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Identical behaviour with the id passed as a query parameter instead of a path segment. Easier if your HTTP client mangles encoded path segments."
+          }
+        },
+        {
+          "name": "GET /api/legal/laws/article/:article_id — one article",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/laws/article/{{article_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "laws",
+                "article",
+                "{{article_id}}"
+              ]
+            },
+            "description": "One article by its full composite id. Use it to resolve entries in another article's 'dependencies' list into a linked-article view."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Laws RAG",
+      "item": [
+        {
+          "name": "POST /api/legal/laws/search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"السرقة الموصوفة ليلاً مع الكسر\",\n  \"top_n\": 7,\n  \"hybrid_top_k\": 15,\n  \"exclude_repealed\": false,\n  \"min_score\": 0.0,\n  \"with_dependencies\": true,\n  \"dep_depth\": 2,\n  \"dep_max\": 12,\n  \"dep_dedupe_vs_hits\": true,\n  \"decompose\": false,\n  \"rerank_max_length\": 512\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/laws/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "laws",
+                "search"
+              ]
+            },
+            "description": "Hybrid dense+sparse Qdrant retrieval, RRF fusion, cross-encoder rerank, then merge of linked articles. Only 'text' is required; every other field is optional and overrides the server default for this request only. Cold first call ~45s while models load."
+          }
+        },
+        {
+          "name": "GET /api/legal/laws/config",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/laws/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "laws",
+                "config"
+              ]
+            },
+            "description": "Current server defaults, the list of request-tunable parameter names, and whether the feature is loaded."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Cases RAG (precedents)",
+      "item": [
+        {
+          "name": "POST /api/legal/cases/search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"قام المتهم بكسر باب المنزل ليلاً وسرقة مبلغ مالي واعترف بالفعل\",\n  \"top_k\": 5,\n  \"hybrid_top_k\": 15,\n  \"threshold\": 0.5,\n  \"rerank_max_length\": 2048\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/cases/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "cases",
+                "search"
+              ]
+            },
+            "description": "FAISS + BM25 over past judgments, RRF, rerank, similarity threshold. Lower 'threshold' if you get zero results on short queries. Cold first call ~45s."
+          }
+        },
+        {
+          "name": "GET /api/legal/cases/config",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/cases/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "cases",
+                "config"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Judgment prediction (إصدار الحكم الأولي)",
+      "description": "الميزة الكاملة كما في نوتبوك issuing_preliminary_ruling: طبقة PLJP لإعادة تنظيم الوقائع، طبقة ADAPT لتمييز المواد المتشابهة لفظياً، وطبقة التحقق الذاتي (اقتباسات + انسجام السوابق). النموذج اللغوي يُستدعى كـ API عبر HuggingFace Inference Providers (Llama 3.1) بلا تنزيل أوزان. في واجهة احتياطية تُستعمل تلقائياً عند نفاد الحصة أو تعطّل المزوّد؛ اقرئي meta.llm.served_by لتعرفي من خدم كل مرحلة فعلاً.",
+      "item": [
+        {
+          "name": "POST /api/legal/judgment/predict",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"تقدم المدعي بادعائه أنه سلّم المدعى عليه مبلغاً من المال على سبيل الأمانة بموجب سند موقع ومزيل ببصمة إصبعه، وقد وجّه إليه إنذاراً عدلياً مطالباً بإعادة المبلغ إلا أن المدعى عليه رفض الرد ولم يردّ الأمانة حتى تاريخ الادعاء.\",\n  \"config\": {\n    \"top_k_laws\": 5,\n    \"top_k_cases\": 3,\n    \"case_threshold\": 0.45,\n    \"use_fact_reorganization\": true,\n    \"use_statute_discrimination\": true,\n    \"use_domain_classifier\": true,\n    \"max_quote_words\": 12,\n    \"llm_backend\": \"hf\",\n    \"llm_model\": \"meta-llama/Llama-3.3-70B-Instruct\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/judgment/predict",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "judgment",
+                "predict"
+              ]
+            },
+            "description": "إصدار الحكم الأولي — أبطأ مسار في المشروع.\n\nيستدعي داخلياً Laws RAG و Cases RAG، ثم المصنّف الإحصائي، ثم حتى 5 استدعاءات للنموذج اللغوي:\n  1× إعادة تنظيم الوقائع (PLJP) + 1×..3× تمييز المواد المتشابهة (ADAPT) + 1× الحكم النهائي.\nتوقّعي 40–90 ثانية على الـ CPU. اضبطي timeout الـ Postman على 180000ms على الأقل.\n\nالمتطلبات: HF_TOKEN في ملف .env (أو GROQ_API_KEY مع llm_backend=groq).\nتحقّقي أولاً بـ GET /judgment/llm/ping — أرخص بكثير من انتظار المسار كاملاً.\n\n'text' يجب ألّا يقل عن 20 محرفاً. كل تجاوز للإعدادات يوضع داخل كائن 'config' لا في الجذر.\nلتسريع التجربة: use_fact_reorganization=false و use_statute_discrimination=false توفّر حتى 4 استدعاءات.\n\nبنية data الثابتة التي تعتمد عليها الواجهة الأمامية:\n  ok, outcome, outcome_is_standard, final_charge, facts_summary\n  candidate_charges[]  — كل عنصر يحمل flagged و flag_reason جاهزين للتلوين\n  reasoning{charges_analysis, exclusion_notes, precedent_alignment}\n  verification{fully_grounded, label, unknown_statute_citations, unknown_case_citations,\n               unsupported_charge_quotes[], precedent_article_mismatches[]}\n  evidence{statutes[], cases[], classifier_candidates[], reorganized_facts,\n           confusable_pairs[], discrimination[], retrieval_text}\n  raw_model_output — مخرَج النموذج الخام كما هو\n  meta{took_ms, llm{backend,model}, pipeline{...}, config_used{...}}\n\nرمز 502 يعني أن النموذج لم يُعِد JSON صالحاً؛ الجسم يحمل data.evidence للاسترجاع.\nرمز 503 يعني مفتاح ناقص أو فهرس غير مبني."
+          }
+        },
+        {
+          "name": "POST /api/legal/judgment/predict — أسرع (بلا طبقتَي LLM الإضافيتين)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"تقدم المدعي بادعائه أنه سلّم المدعى عليه مبلغاً من المال على سبيل الأمانة بموجب سند موقع ومزيل ببصمة إصبعه، وقد وجّه إليه إنذاراً عدلياً مطالباً بإعادة المبلغ إلا أن المدعى عليه رفض الرد ولم يردّ الأمانة حتى تاريخ الادعاء.\",\n  \"config\": {\n    \"use_fact_reorganization\": false,\n    \"use_statute_discrimination\": false\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/judgment/predict",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "judgment",
+                "predict"
+              ]
+            },
+            "description": "نفس المسار باستدعاء واحد للنموذج اللغوي بدل خمسة. مفيد أثناء تطوير الواجهة الأمامية."
+          }
+        },
+        {
+          "name": "GET /api/legal/judgment/config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/judgment/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "judgment",
+                "config"
+              ]
+            },
+            "description": "حالة الميزة قبل فتح الشاشة في الواجهة.\n\ndata.ready = false يعني أن مفتاح النموذج اللغوي غير مضبوط، و blocking_reason يشرح السبب\nبرسالة عربية جاهزة للعرض. اقرئي أيضاً:\n  llm.active_backend / llm.active_model / llm.backends{...}.key_set\n  depends_on.classifier_available  — false يعني تخطّي المصنّف الإحصائي بصمت لا خطأ\n  outcomes  — القيم الثلاث المسموحة لحقل outcome، استعمليها في مفاتيح الترجمة والألوان\n  tunable_in_request  — كل مفتاح يقبله كائن config في طلب predict"
+          }
+        },
+        {
+          "name": "GET /api/legal/judgment/llm/ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/judgment/llm/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "judgment",
+                "llm",
+                "ping"
+              ]
+            },
+            "description": "استدعاء تجريبي قصير للنموذج اللغوي (توكنات معدودة).\n\nيفصل عطل المفتاح/النموذج عن عطل الاسترجاع، فلا تنتظري دقيقة كاملة لتكتشفي أن الرمز خاطئ.\nالجسم اختياري: {\"backend\": \"hf\" | \"openrouter\" | \"gemini\" | \"groq\", \"model\": \"...\"}\nلتجربة تركيبة غير الافتراضية — مفيد للتأكد أن الواجهة الاحتياطية نفسها حيّة.\nعند الفشل يعود 502 مع data.error يحمل رسالة المزوّد الأصلية."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Contract templates RAG",
+      "item": [
+        {
+          "name": "POST /api/legal/contracts/search — step 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"بدي عقد ايجار محل تجاري\",\n  \"top_k\": 5,\n  \"min_score\": 0.0,\n  \"suggest\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/contracts/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "contracts",
+                "search"
+              ]
+            },
+            "description": "Returns candidate templates plus an optional LLM suggestion of the best one. suggest:true costs one Groq call and needs GROQ_API_KEY — pass false for pure semantic search. The suggestion never decides for the user; it returns choice/reason and the user picks."
+          }
+        },
+        {
+          "name": "POST /api/legal/contracts/get — step 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"doc_id\": \"{{doc_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/contracts/get",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "contracts",
+                "get"
+              ]
+            },
+            "description": "Full template body and placeholder list. Accepts {doc_id} (preferred) or {subject}, where subject must match a search result exactly. Returns 404 if neither matches."
+          }
+        },
+        {
+          "name": "GET /api/legal/contracts/:doc_id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/contracts/{{doc_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "contracts",
+                "{{doc_id}}"
+              ]
+            },
+            "description": "GET-style equivalent of /contracts/get. Note that the literal path /contracts/config resolves to the config route, so a template whose doc_id is 'config' is unreachable this way — use the POST form."
+          }
+        },
+        {
+          "name": "GET /api/legal/contracts/config",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/contracts/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "contracts",
+                "config"
+              ]
+            },
+            "description": "Defaults plus, once the index is loaded, total_contracts and a per-category count you can use to build a browse/filter UI."
+          }
+        }
+      ]
+    }
+  ]
+}

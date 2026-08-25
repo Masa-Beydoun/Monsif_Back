@@ -1,3 +1,22 @@
+"""
+تلخيص نص القضية واستخراج حقول بنيوية.
+
+منقول عن summerization-3.ipynb — الأقسام [1] Preprocessor، [2] LegalSummarizer
+(TextRank + MMR + ترجيح كلمات حساسة قانونياً)، [3] StructuredFieldExtractor
+(regex بحت، صفر اختلاق). تكافؤ سلوكي مؤكَّد: نفس المُخرَج حرفياً لعشرات
+التركيبات (نصوص × نِسَب ضغط × تفعيل/تعطيل MMR).
+
+النوتبوك فيه كمان قسمان اختياريان لم يُنقَلا: FactExtractor (استخراج ثالوث
+فاعل-فعل-مفعول عبر Stanza dependency parsing) وEntityExtractor (NER عبر
+نموذج hatmimoha/arabic-ner). قرار مقصود لا نسيان: في كل استدعاء فعلي بالنوتبوك
+نفسه (خلايا "Testing" و"MY TEST") يُنشأ الـ pipeline بـ
+`enable_fact_extraction=False, enable_ner=False` — أي أن مؤلف النوتبوك لم
+يُشغّلهما فعلياً قط. إضافتهما لاحقاً تستلزم: تبعية stanza جديدة (تُنزّل نموذجها
+الخاص) للأولى، ونموذج NER إضافي (~500MB، عبر transformers الموجودة أصلاً)
+للثانية، وتعديل شكل الاستجابة في IntelligentLegalPipeline.analyze() وفي
+routes/summarization_routes.py لإخراج facts_triples وentities.
+"""
+
 import re
 import numpy as np
 import networkx as nx

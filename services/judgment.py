@@ -21,13 +21,14 @@ import json
 import os
 import re
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
 import numpy as np
 
 import config
-from services import cases_rag, laws_rag
+from services import cases_rag, laws_rag, llm_client
 
 
 # تطبيع النص العربي (لمقارنة الاقتباسات)
@@ -73,11 +74,21 @@ class JudgmentConfig:
     top_k_cases: int = 3
     exclude_repealed_laws: bool = True
     min_law_score: float = 0.0
+    # عتبات جودة المواد المسترجَعة (انظر laws_rag.apply_score_cutoffs).
+    # 0.0 = مطابقة النوتبوك: خليّة ADAPT تستدعي search() بلا عتبة نسبية ولا قصّ
+    # ذيل، فتصل المواد الخمس كاملة إلى السياق. رفعها يُنظّف السياق لكنه يقلّص
+    # قائمة المواد (قيست: 5 مواد → مادة واحدة على وقائع الأمانة).
+    law_min_score_ratio: float = 0.0
+    law_score_drop_ratio: float = 0.0
     case_threshold: float = 0.45
     max_output_tokens: int = 3072
     temperature: float = 0.1
     fact_reorg_max_tokens: int = 512
-    groq_model: str = "qwen/qwen3.6-27b"
+    # النموذج اللغوي: فارغ = الافتراضي العام في config (hf + Llama 3.1).
+    llm_backend: str = ""
+    llm_model: str = ""
+    # مهمل: يُقرأ فقط عندما تكون الواجهة groq ولم يُحدَّد llm_model.
+    groq_model: str = ""
     max_quote_words: int = 12
 
     # المصنّف الإحصائي المتخصص
@@ -93,8 +104,36 @@ class JudgmentConfig:
     # تمييز المواد المتشابهة لفظياً
     use_statute_discrimination: bool = True
     confusable_overlap_threshold: float = 0.15
+    # طول نافذة المقارنة بالكلمات. 40 = مطابقة النوتبوك حرفياً.
+    # تنبيه مقيس: على بيانات هذا المشروع تقطع نافذة الـ40 المادةَ 656 قبل شطر
+    # العقوبة، فتهبط مشابهتها مع 657 إلى 0.067 (تحت العتبة 0.15) ولا يتشكّل
+    # الزوج. القيمة 0 (المتن كامل) ترفعها إلى 0.275.
+    confusable_window_words: int = 40
     max_confusable_pairs: int = 3
     discrimination_max_tokens: int = 400
+
+    # مفتاحان يفصلان سلوك النوتبوك عن التصحيحات المقيسة. القيم الافتراضية
+    # هي سلوك النوتبوك حرفياً؛ لا يُفعَّل أي منهما إلا بطلب صريح.
+    #
+    # False = النوتبوك: كشف الأزواج يمسح المواد المسترجَعة مباشرةً فقط.
+    #   ملاحظة مقيسة: المادة 656 لا تظهر في الاسترجاع المباشر إطلاقاً (657 تأتي
+    #   بنتيجة 0.746 و656 خارج أعلى النتائج)، وتصل عبر استشهادات السوابق وحدها.
+    #   لذلك يبقى الكشف بلا أزواج على هذه البيانات ما دام هذا المفتاح False.
+    confusable_scan_cited_articles: bool = False
+    #
+    # False = النوتبوك: مطابقة السوابق بـ case_number.
+    #   ملاحظة مقيسة: الرقم ليس فريداً (48 تصادماً، 47 منها قضايا مختلفة فعلاً)،
+    #   فقد تُنسب التسمية المرشحة إلى قضية أخرى تحمل الرقم نفسه.
+    precedent_key_by_uid: bool = False
+    #
+    # False = النوتبوك: حلّ استشهادات السوابق بتلميح فضفاض وبلا مرشِّح.
+    #   ملاحظة مقيسة على 301 قضية: 254 من 645 استشهاداً رقمياً (39%) تُحَل إلى
+    #   القانون الخطأ — أشهرها المادة 129 التي تذهب إلى قانون العقوبات العسكري
+    #   لأن اسمه يتضمّن كلمة «العقوبات». ومسار other_laws (163 مدخلاً) يلتقط أول
+    #   رقم في النص، وهو غالباً رقم المرسوم لا رقم المادة («مرسوم العفو العام
+    #   رقم 13 لعام 2021» ← يُقرأ كالمادة 13).
+    #   True = تضييق المطابقة، وإسقاط ما يبقى ملتبساً بدل تخمينه.
+    strict_citation_law_match: bool = False
 
     @classmethod
     def from_request(cls, overrides: Optional[Dict] = None) -> "JudgmentConfig":
@@ -182,52 +221,75 @@ def get_domain_classifier(cfg: JudgmentConfig) -> Optional[DomainCrimeClassifier
     return _classifier_instance
 
 
-# عميل النموذج اللغوي (Groq)
+# عميل النموذج اللغوي
 
-class MissingAPIKey(RuntimeError):
-    pass
+# يُعاد تصديرهما كي يبقى `except judgment.MissingAPIKey` في الـ route صالحاً.
+MissingAPIKey = llm_client.MissingAPIKey
+LLMError = llm_client.LLMError
 
 
-def _groq_client():
-    if not config.GROQ_API_KEY:
-        raise MissingAPIKey(
-            "GROQ_API_KEY غير مضبوط. أضيفيه لملف .env بجذر المشروع:\n"
-            "    GROQ_API_KEY=gsk_..."
-        )
-    from groq import Groq
+def resolve_llm(cfg: JudgmentConfig):
+    """(الواجهة، النموذج) الفعليان لهذا الطلب.
 
-    return Groq(api_key=config.GROQ_API_KEY)
+    groq_model حقل مهمل، فلا يُعتدّ به إلا مع الواجهة groq تحديداً — وإلا لسرّب
+    اسم نموذج Groq إلى واجهة HuggingFace وأعاد 404.
+    """
+    backend = (cfg.llm_backend or config.LLM_BACKEND or "hf").strip().lower()
+    model = (cfg.llm_model or "").strip()
+    if not model and backend == "groq":
+        model = (cfg.groq_model or "").strip()
+    return llm_client.resolve(backend, model)
+
+
+# سجلّ الاستدعاءات الفعلية لكل طلب.
+#
+# ‏resolve_llm يعطي الواجهة **المخطَّطة**؛ أما ما خدم الطلب فعلاً فقد يكون
+# الاحتياطية عند نفاد الحصة. بدون هذا السجلّ يعرض meta.llm الواجهة المخطَّطة
+# دائماً، فتظهر للواجهة الأمامية معلومة خاطئة كلما جرى تحويل.
+#
+# ‏thread-local لأن Flask يعمل بـ threaded=True: طلبان متزامنان لا يخلطان سجليهما.
+_call_log = threading.local()
+
+
+def reset_llm_call_log() -> None:
+    _call_log.entries = []
+
+
+def get_llm_call_log() -> List[Dict]:
+    return list(getattr(_call_log, "entries", None) or [])
+
+
+def _record_llm_call(stage: str, used: Dict) -> None:
+    entries = getattr(_call_log, "entries", None)
+    if entries is None:
+        return
+    entry = {"stage": stage}
+    entry.update(used)
+    entries.append(entry)
 
 
 def _chat_json(messages: List[Dict], cfg: JudgmentConfig, max_tokens: int,
-               temperature: float = 0.0) -> Optional[dict]:
-    """استدعاء Groq وإرجاع JSON مُحلَّل، أو None عند الفشل."""
-    try:
-        client = _groq_client()
-        kwargs = dict(
-            model=cfg.groq_model, messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=max_tokens, temperature=temperature,
-        )
-        try:
-            # يعطّل وضع التفكير في نماذج Qwen3؛ غير مدعوم في كل النماذج.
-            response = client.chat.completions.create(reasoning_effort="none", **kwargs)
-        except Exception:
-            response = client.chat.completions.create(**kwargs)
+               temperature: float = 0.0, stage: str = "llm") -> Optional[dict]:
+    """استدعاء النموذج اللغوي وإرجاع JSON مُحلَّل، أو None عند فشل الاستدعاء.
 
-        raw = response.choices[0].message.content
-        if not raw or not raw.strip():
-            print("[judgment] أعاد النموذج اللغوي محتوى فارغاً.", flush=True)
-            return None
-        return json.loads(raw)
+    خطأ المفتاح وحده يُرمى للأعلى؛ فهو خطأ إعداد يستحق 503 لا محاولة إكمال
+    المسار بسياق ناقص.
+    """
+    backend, model = resolve_llm(cfg)
+    used: Dict = {}
+    try:
+        return llm_client.chat_json(
+            messages, backend=backend, model=model,
+            max_tokens=max_tokens, temperature=temperature, used=used,
+        )
     except MissingAPIKey:
         raise
-    except json.JSONDecodeError as e:
-        print(f"[judgment] JSON غير صالح: {e}", flush=True)
+    except llm_client.LLMError as e:
+        print(f"[judgment] {e}", flush=True)
         return None
-    except Exception as e:
-        print(f"[judgment] تعذّر الاتصال بخدمة النموذج اللغوي: {e}", flush=True)
-        return None
+    finally:
+        if used:
+            _record_llm_call(stage, used)
 
 
 # إعادة تنظيم الوقائع قبل الاسترجاع
@@ -256,6 +318,7 @@ def reorganize_facts(facts_input: str, cfg: JudgmentConfig) -> Dict[str, str]:
         [{"role": "system", "content": FACT_REORG_SYSTEM},
          {"role": "user", "content": f"وقائع القضية:\n{facts_input}"}],
         cfg, max_tokens=cfg.fact_reorg_max_tokens, temperature=0.0,
+        stage="fact_reorganization",
     )
     if not isinstance(parsed, dict):
         print("[judgment] تعذّرت إعادة تنظيم الوقائع؛ سيُستخدم النص الخام للاسترجاع.",
@@ -285,24 +348,54 @@ def build_retrieval_text(facts_input: str, reorganized: Dict[str, str]) -> str:
 
 # تمييز المواد المتشابهة لفظياً (ADAPT)
 
-def detect_confusable_statutes(retrieved_laws: List, cfg: JudgmentConfig) -> List[Dict]:
+def _statute_view(item) -> Dict:
+    """توحيد شكل المادة: كائن SearchResult من الاسترجاع، أو dict من السوابق."""
+    if isinstance(item, dict):
+        return {"article_id": item.get("article_id"),
+                "law_name": item.get("law_name") or "",
+                "body": item.get("body") or ""}
+    return {"article_id": item.article_id,
+            "law_name": item.law_name or "",
+            "body": item.body or ""}
+
+
+def _body_words(body: str, window: int) -> List[str]:
+    """كلمات المتن، مقصوصة على نافذة إن طُلبت (0 = المتن كامل)."""
+    words = body.split()
+    return words[:window] if window else words
+
+
+def detect_confusable_statutes(statutes: List, cfg: JudgmentConfig) -> List[Dict]:
     """كشف تقريبي لأزواج المواد من القانون نفسه المتقاربة لفظياً.
 
-    يعتمد تقاطع مفردات أول 40 كلمة، ويكفي لالتقاط حالات مثل 656/657 دون
+    يعتمد تقاطع مفردات المتن (معامل جاكار)، ويكفي لالتقاط حالات مثل 656/657 دون
     نموذج تشابه دلالي كامل.
+
+    ما يُمرَّر إليها يحدّده cfg.confusable_scan_cited_articles في gather_context:
+    قائمة الاسترجاع وحدها (سلوك النوتبوك) أو اتحادها مع مواد السوابق.
     """
+    window = max(0, int(cfg.confusable_window_words or 0))
+
+    unique, seen = [], set()
+    for item in statutes:
+        view = _statute_view(item)
+        if view["article_id"] and view["article_id"] not in seen:
+            seen.add(view["article_id"])
+            unique.append(view)
+
     pairs = []
-    laws = list(retrieved_laws)
-    for i, a in enumerate(laws):
-        for b in laws[i + 1:]:
-            if a.law_name != b.law_name:
+    for i, a in enumerate(unique):
+        for b in unique[i + 1:]:
+            if a["law_name"] != b["law_name"]:
                 continue
-            words_a = set(a.body.split()[:40])
-            words_b = set(b.body.split()[:40])
+            words_a = set(_body_words(a["body"], window))
+            words_b = set(_body_words(b["body"], window))
             overlap = len(words_a & words_b) / max(len(words_a | words_b), 1)
             if overlap >= cfg.confusable_overlap_threshold:
-                pairs.append({"article_a": a.article_id, "article_b": b.article_id,
+                pairs.append({"article_a": a["article_id"], "article_b": b["article_id"],
                               "overlap": round(overlap, 2)})
+
+    # لا ترتيب: النوتبوك يقتطع الأزواج بترتيب ورودها.
     return pairs[:cfg.max_confusable_pairs]
 
 
@@ -333,6 +426,7 @@ def discriminate_confusable_statutes(facts_input: str, pair: Dict, bodies: Dict[
         [{"role": "system", "content": DISCRIMINATION_SYSTEM},
          {"role": "user", "content": user_msg}],
         cfg, max_tokens=cfg.discrimination_max_tokens, temperature=0.0,
+        stage="statute_discrimination",
     )
     if not isinstance(parsed, dict):
         return None
@@ -345,10 +439,23 @@ def discriminate_confusable_statutes(facts_input: str, pair: Dict, bodies: Dict[
 
 PENAL_CODE_HINTS = ["العقوبات", "قانون العقوبات"]
 
+# التلميح أعلاه فحصُ تضمين نصي، و«قانون العقوبات واصول المحاكمات العسكرية» يتضمّن
+# كلمة «العقوبات»، فيلتقطه أيضاً. هذا التلميح يحصر المطابقة بالقانون العام.
+PENAL_CODE_STRICT_HINTS = ["قانون العقوبات العام"]
+
+# «مادة 24 (القانون رقم 20 لعام 2022)» ← 24. أما «مرسوم العفو رقم 13 لعام 2021»
+# فلا يذكر مادة إطلاقاً، ورقمه رقم المرسوم؛ في الوضع الصارم يُسقَط بدل تخمينه.
+_ARTICLE_IN_ENTRY_RE = re.compile(r"(?:المادة|مادة)\s*/?(\d+)")
+
 
 def _find_article_by_number(article_number: str,
-                            law_name_contains: Optional[List[str]] = None):
-    """بحث عن مادة برقم معيّن في المجموعة الكاملة، لا في النتائج المسترجعة."""
+                            law_name_contains: Optional[List[str]] = None,
+                            require_unique: bool = False):
+    """بحث عن مادة برقم معيّن في المجموعة الكاملة، لا في النتائج المسترجعة.
+
+    require_unique=True يعيد None عند بقاء أكثر من مرشّح بعد الترشيح، بدل انتقاء
+    الأول اعتباطاً: رقم المادة وحده لا يميّز بين 24 قانوناً تحمل «المادة 1».
+    """
     rag = laws_rag.get_rag()
     article_number = str(article_number).strip()
     candidates = [a for a in rag.articles if a.article_number == article_number]
@@ -357,14 +464,25 @@ def _find_article_by_number(article_number: str,
                     if any(h in (a.law_name or "") for h in law_name_contains)]
         if filtered:
             candidates = filtered
+        elif require_unique:
+            return None
+    if require_unique:
+        return candidates[0] if len(candidates) == 1 else None
     return candidates[0] if candidates else None
 
 
-def resolve_case_citations(case: Dict) -> List[Dict]:
-    """استخراج نصوص المواد المذكورة صراحةً داخل سابقة، من مجموعة المواد."""
+def resolve_case_citations(case: Dict, cfg: Optional[JudgmentConfig] = None) -> List[Dict]:
+    """استخراج نصوص المواد المذكورة صراحةً داخل سابقة، من مجموعة المواد.
+
+    السلوك الافتراضي هو سلوك النوتبوك؛ cfg.strict_citation_law_match يضيّقه.
+    """
+    strict = bool(cfg and cfg.strict_citation_law_match)
+    penal_hints = PENAL_CODE_STRICT_HINTS if strict else PENAL_CODE_HINTS
+
     resolved = []
     for num in case.get("penal_code_articles") or []:
-        art = _find_article_by_number(num, law_name_contains=PENAL_CODE_HINTS)
+        art = _find_article_by_number(num, law_name_contains=penal_hints,
+                                      require_unique=strict)
         if art:
             resolved.append({
                 "article_id": art.article_id, "law_name": art.law_name,
@@ -372,10 +490,22 @@ def resolve_case_citations(case: Dict) -> List[Dict]:
                 "source": f"مذكورة بالقضية رقم {case.get('case_number')}",
             })
     for entry in case.get("other_laws") or []:
-        m = re.search(r"(\d+)", str(entry))
-        if not m:
-            continue
-        art = _find_article_by_number(m.group(1))
+        text = str(entry)
+        if strict:
+            # لا يُقبل إلا ما ذُكرت فيه «مادة N» صراحةً، ويُرشَّح باسم القانون
+            # الوارد في النص نفسه؛ ما يبقى ملتبساً يُسقَط.
+            m = _ARTICLE_IN_ENTRY_RE.search(text)
+            if not m:
+                continue
+            name_hint = text[m.end():].strip(" ()").strip()
+            art = _find_article_by_number(
+                m.group(1), law_name_contains=[name_hint] if name_hint else None,
+                require_unique=True)
+        else:
+            m = re.search(r"(\d+)", text)
+            if not m:
+                continue
+            art = _find_article_by_number(m.group(1))
         if art and art.article_id not in {r["article_id"] for r in resolved}:
             resolved.append({
                 "article_id": art.article_id, "law_name": art.law_name,
@@ -414,6 +544,8 @@ def gather_context(facts_input: str, cfg: JudgmentConfig) -> Dict:
     retrieved_laws = laws_rag.get_rag().search_raw(
         retrieval_text, top_n=cfg.top_k_laws,
         exclude_repealed=cfg.exclude_repealed_laws, min_score=cfg.min_law_score,
+        min_score_ratio=cfg.law_min_score_ratio,
+        score_drop_ratio=cfg.law_score_drop_ratio,
     )
     retrieved_cases = cases_rag.get_rag().query_raw(
         retrieval_text, top_k=cfg.top_k_cases, threshold=cfg.case_threshold,
@@ -430,9 +562,16 @@ def gather_context(facts_input: str, cfg: JudgmentConfig) -> Dict:
         matched_precedents = retrieve_precedents_per_candidate(
             retrieval_text, candidate_labels, cfg)
 
-        existing_ids = {str(c.get("case_number")) for c in retrieved_cases}
+        # النوتبوك يطابق بـ case_number؛ المفتاح الفريد لا يُستعمل إلا بطلب صريح.
+        def _uid(case: Dict) -> str:
+            if cfg.precedent_key_by_uid:
+                return str(case.get("case_uid") or case.get("file_name")
+                           or case.get("case_number"))
+            return str(case.get("case_number"))
+
+        existing_ids = {_uid(c) for c in retrieved_cases}
         for label, matched_case in matched_precedents.items():
-            cid = str(matched_case.get("case_number"))
+            cid = _uid(matched_case)
             if cid not in existing_ids:
                 new_case = dict(matched_case)
                 new_case["_matched_candidate_label"] = label
@@ -440,21 +579,28 @@ def gather_context(facts_input: str, cfg: JudgmentConfig) -> Dict:
                 existing_ids.add(cid)
             else:
                 for c in retrieved_cases:
-                    if str(c.get("case_number")) == cid:
+                    if _uid(c) == cid:
                         c["_matched_candidate_label"] = label
 
     cited_in_cases, seen_ids = [], {r.article_id for r in retrieved_laws}
     for case in retrieved_cases:
-        for art in resolve_case_citations(case):
+        for art in resolve_case_citations(case, cfg):
             if art["article_id"] not in seen_ids:
                 seen_ids.add(art["article_id"])
                 cited_in_cases.append(art)
 
     discrimination_results: List[Dict] = []
+    confusable_pairs: List[Dict] = []
     if cfg.use_statute_discrimination:
+        # متون المقارنة تشمل الاثنين دائماً، تماماً كالنوتبوك.
         all_bodies = {r.article_id: r.body for r in retrieved_laws}
         all_bodies.update({a["article_id"]: a["body"] for a in cited_in_cases})
-        for pair in detect_confusable_statutes(retrieved_laws, cfg):
+        # أما مدخل الكشف فقائمة الاسترجاع وحدها، إلا إذا طُلب خلاف ذلك صراحةً.
+        scan = list(retrieved_laws)
+        if cfg.confusable_scan_cited_articles:
+            scan += list(cited_in_cases)
+        confusable_pairs = detect_confusable_statutes(scan, cfg)
+        for pair in confusable_pairs:
             d = discriminate_confusable_statutes(facts_input, pair, all_bodies, cfg)
             if d:
                 discrimination_results.append(d)
@@ -467,6 +613,7 @@ def gather_context(facts_input: str, cfg: JudgmentConfig) -> Dict:
         "retrieved_cases": retrieved_cases,
         "cited_in_cases": cited_in_cases,
         "candidate_charges_from_classifier": candidate_charges_from_classifier,
+        "confusable_pairs": confusable_pairs,
         "discrimination_results": discrimination_results,
     }
 
@@ -755,16 +902,18 @@ class LegalJudgmentPredictor:
 
     def predict(self, facts_input: str) -> Dict:
         cfg = self.config
+        reset_llm_call_log()
         context = gather_context(facts_input, cfg)
         prompt = self.prompt_builder.build(context, cfg)
         raw_result = _chat_json([{"role": "user", "content": prompt}], cfg,
                                 max_tokens=cfg.max_output_tokens,
-                                temperature=cfg.temperature)
+                                temperature=cfg.temperature, stage="judgment")
 
         if not isinstance(raw_result, dict):
             return {
                 "error": "parsing_error",
                 "message": "لم يُعِد النموذج اللغوي مخرجاً صالحاً. يرجى إعادة المحاولة.",
+                "llm_calls": get_llm_call_log(),
                 "retrieved_statutes": [r.to_dict() for r in context["retrieved_laws"]],
                 "retrieved_cases": context["retrieved_cases"],
             }
@@ -780,8 +929,142 @@ class LegalJudgmentPredictor:
         raw_result["_classifier_candidates"] = context.get("candidate_charges_from_classifier", [])
         raw_result["_reorganized_facts"] = context.get("reorganized_facts", {})
         raw_result["_discrimination_results"] = context.get("discrimination_results", [])
+        raw_result["_confusable_pairs"] = context.get("confusable_pairs", [])
+        raw_result["_llm_calls"] = get_llm_call_log()
         raw_result["_retrieval_text"] = context.get("retrieval_text", "")
         return raw_result
+
+
+# تشكيل الاستجابة للواجهة الأمامية
+
+OUTCOMES = ["إدانة", "براءة", "إسقاط دعوى"]
+
+VERIFICATION_LABELS = {
+    True: "مطابق للسياق (هوية + مضمون الأركان + انسجام السوابق)",
+    False: "استشهادات أو أركان غير موثّقة — تحتاج مراجعة يدوية",
+}
+
+
+def _enrich_charges(raw_charges, statutes: List[Dict], quote_flags: List[Dict]) -> List[Dict]:
+    """يضيف لكل تهمة بيانات المادة وسبب الوسم، كي لا تربط الواجهة الجداول يدوياً."""
+    by_id = {s["article_id"]: s for s in statutes}
+    flag_by_key = {(f.get("charge"), f.get("article_id")): f for f in quote_flags}
+
+    charges = []
+    for ch in raw_charges or []:
+        if not isinstance(ch, dict):
+            charges.append({"charge": str(ch), "article_id": None, "flagged": True,
+                            "flag_reason": "صيغة غير متوقعة من النموذج اللغوي"})
+            continue
+        aid = ch.get("article_id")
+        statute = by_id.get(aid, {})
+        flag = flag_by_key.get((ch.get("charge"), aid))
+        charges.append({
+            "charge": ch.get("charge"),
+            "article_id": aid,
+            "article_number": statute.get("article_number"),
+            "law_name": statute.get("law_name"),
+            "article_status": statute.get("status"),
+            "supporting_quote": ch.get("supporting_quote"),
+            "elements_match": ch.get("elements_match"),
+            # الواجهة تلوّن بهذين الحقلين مباشرة دون قراءة كتلة التحقق.
+            "flagged": flag is not None,
+            "flag_reason": flag.get("reason") if flag else None,
+        })
+    return charges
+
+
+def build_api_payload(result: Dict, cfg: JudgmentConfig, took_ms: int) -> Dict:
+    """يحوّل مخرَج المتنبّئ إلى بنية ثابتة موثّقة تستهلكها الواجهة الأمامية.
+
+    مخرَج النموذج اللغوي الخام يبقى تحت raw_model_output، فأي تغيير في الـ prompt
+    لا يكسر عقد الواجهة.
+    """
+    backend, model = resolve_llm(cfg)
+    calls = result.get("_llm_calls") or result.get("llm_calls") or []
+    served = [{"stage": c.get("stage"), "backend": c.get("backend"),
+               "model": c.get("model")} for c in calls]
+    meta = {
+        "took_ms": took_ms,
+        "llm": {
+            # المخطَّط مقابل ما خدم فعلاً: يفترقان عند التحويل الاحتياطي.
+            "backend": backend,
+            "model": model,
+            "fallback_used": any(c.get("fallback_used") for c in calls),
+            "calls": len(calls),
+            "served_by": served,
+        },
+        "pipeline": {
+            "fact_reorganization": bool(cfg.use_fact_reorganization),
+            "domain_classifier": bool(cfg.use_domain_classifier) and classifier_available(),
+            "statute_discrimination": bool(cfg.use_statute_discrimination),
+        },
+        "config_used": asdict(cfg),
+    }
+
+    if result.get("error"):
+        return {
+            "ok": False,
+            "error": result["error"],
+            "message": result.get("message"),
+            "evidence": {
+                "statutes": result.get("retrieved_statutes", []),
+                "cases": result.get("retrieved_cases", []),
+            },
+            "meta": meta,
+        }
+
+    verification = dict(result.get("_verification", {}))
+    fully = bool(verification.get("fully_grounded"))
+    verification["label"] = VERIFICATION_LABELS[fully]
+
+    # القائمة الكاملة (مسترجَعة دلالياً + مستخرجة من تسبيب السوابق) — تلزم كاملةً
+    # لتعبئة article_number/law_name لأي تهمة، حتى لو استشهدت بمادة لم تُسترجَع
+    # دلالياً وإنما وصلت فقط عبر سابقة (حالة 656 الموثّقة في README).
+    statutes = result.get("_retrieved_statutes", [])
+    charges = _enrich_charges(result.get("candidate_charges"), statutes,
+                              verification.get("unsupported_charge_quotes", []))
+
+    # أما قائمة «النصوص المسترجَعة» المعروضة للتصفّح فتقتصر على المسترجَعة
+    # دلالياً وحدها (تحمل مفتاح score). المستخرجة من تسبيب السوابق ليس لها نسبة
+    # تشابه أصلاً — لم تُقارَن بوقائع القضية قط — فعرضها بجانب نتائج مرتّبة
+    # بالتشابه يوهم أنها منها. تبقى متاحة داخلياً للنموذج والتحقق، فلا شيء
+    # يُفقد سوى ظهورها بهذه القائمة تحديداً.
+    scored_statutes = [s for s in statutes if "score" in s]
+
+    outcome = str(result.get("outcome") or "").strip()
+    reasoning = result.get("reasoning") or {}
+
+    return {
+        "ok": True,
+        "facts_summary": result.get("facts_summary"),
+        "outcome": outcome,
+        # قيمة خارج القائمة تعني أن النموذج خرج عن التعليمات؛ تعرضها الواجهة كتحذير.
+        "outcome_is_standard": outcome in OUTCOMES,
+        "final_charge": result.get("final_charge"),
+        "candidate_charges": charges,
+        "reasoning": {
+            "charges_analysis": reasoning.get("charges_analysis"),
+            "exclusion_notes": reasoning.get("exclusion_notes"),
+            "precedent_alignment": reasoning.get("precedent_alignment"),
+        },
+        "cited_statutes": result.get("cited_statutes", []),
+        "cited_precedents": result.get("cited_precedents", []),
+        "suggested_penalty_range": result.get("suggested_penalty_range"),
+        "confidence_note": result.get("confidence_note"),
+        "verification": verification,
+        "evidence": {
+            "statutes": scored_statutes,
+            "cases": result.get("_retrieved_cases", []),
+            "classifier_candidates": result.get("_classifier_candidates", []),
+            "reorganized_facts": result.get("_reorganized_facts", {}),
+            "confusable_pairs": result.get("_confusable_pairs", []),
+            "discrimination": result.get("_discrimination_results", []),
+            "retrieval_text": result.get("_retrieval_text", ""),
+        },
+        "raw_model_output": {k: v for k, v in result.items() if not k.startswith("_")},
+        "meta": meta,
+    }
 
 
 # واجهة الاستخدام
@@ -795,6 +1078,6 @@ def warmup() -> None:
 def predict_judgment(facts_input: str, overrides: Optional[Dict] = None) -> Dict:
     """الدالة الوحيدة التي يحتاجها الـ route."""
     cfg = JudgmentConfig.from_request(overrides)
+    t0 = time.time()
     result = LegalJudgmentPredictor(cfg).predict(facts_input)
-    result["_config_used"] = asdict(cfg)
-    return result
+    return build_api_payload(result, cfg, int((time.time() - t0) * 1000))

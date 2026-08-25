@@ -7,6 +7,7 @@ from routes.judgment_routes import judgment_bp
 from routes.law_and_jurisprudence_search_routes import legal_search_bp
 from routes.classification_routes import classification_bp
 from routes.contracts_routes import contracts_bp
+from routes.laws_catalog_routes import laws_catalog_bp
 from routes.laws_rag_routes import laws_rag_bp
 from routes.summarization_routes import legal_summarization
 from services import model_registry
@@ -19,6 +20,7 @@ CORS(app)
 app.register_blueprint(legal_summarization, url_prefix="/api/legal")  # /summarize
 app.register_blueprint(legal_search_bp, url_prefix="/api/legal")  # /search
 app.register_blueprint(laws_rag_bp, url_prefix="/api/legal")  # /laws/search
+app.register_blueprint(laws_catalog_bp, url_prefix="/api/legal")  # /laws · /laws/<id>/articles
 app.register_blueprint(cases_rag_bp, url_prefix="/api/legal")  # /cases/search
 app.register_blueprint(judgment_bp, url_prefix="/api/legal")  # /judgment/predict
 app.register_blueprint(contracts_bp, url_prefix="/api/legal")  # /contracts/search
@@ -34,9 +36,16 @@ def home():
             "endpoints": {
                 "POST /api/legal/summarize": "تلخيص نص قضية واستخراج الحقول",
                 "POST /api/legal/search": "بحث المواد + الاجتهادات (النظام القديم)",
+                "GET  /api/legal/laws": "قائمة القوانين مع عدد المواد والتصنيفات",
+                "GET  /api/legal/laws/<law_id>/articles": "مواد قانون معيّن مجمَّعة ضمن تصنيفاتها",
+                "GET  /api/legal/laws/article/<article_id>": "مادة واحدة بكل معلوماتها",
                 "POST /api/legal/laws/search": "RAG المواد القانونية",
                 "POST /api/legal/cases/search": "RAG السوابق القضائية",
                 "POST /api/legal/judgment/predict": "إصدار حكم أولي (يعتمد على الاتنين فوق)",
+                "GET  /api/legal/judgment/config": "جاهزية الميزة + إعداداتها الافتراضية",
+                "GET  /api/legal/judgment/llm/ping": "فحص سريع لمفتاح النموذج اللغوي",
+                "GET  /api/legal/contracts": "تصفّح كل نماذج العقود مع فلترة بالفئة/نص",
+                "GET  /api/legal/contracts/<doc_id>": "عرض نموذج عقد كامل بالـ doc_id",
                 "POST /api/legal/contracts/search": "RAG نماذج العقود + اقتراح الأنسب",
                 "POST /api/legal/contracts/get": "عرض نموذج عقد كامل بالـ doc_id",
                 "GET  /api/health": "حالة النماذج المحمّلة",

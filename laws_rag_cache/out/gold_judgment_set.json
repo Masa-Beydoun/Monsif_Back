@@ -1,0 +1,13 @@
+[
+  {
+    "case_id": "g01",
+    "facts": "...",
+    "expected_outcome": "إدانة",
+    "expected_charge": "خيانة الأمانة",
+    "expected_article_ids": [
+      "law:656"
+    ],
+    "complexity": "easy",
+    "notes": ""
+  }
+]

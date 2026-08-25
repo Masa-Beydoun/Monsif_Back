@@ -86,9 +86,12 @@ def summarize(name: str, payload: dict) -> str:
         return (f"{n} مرشح | الأول: {top.get('subject', '—')} ({top.get('score', '—')}) "
                 f"| اقتراح: {sug} | {d.get('took_ms')}ms")
     if name == "judgment":
-        v = d.get("_verification", {})
+        v = d.get("verification", {})
+        llm = d.get("meta", {}).get("llm", {})
+        flagged = sum(1 for c in d.get("candidate_charges", []) if c.get("flagged"))
         return (f"outcome={d.get('outcome')} | تهم={len(d.get('candidate_charges', []))} "
-                f"| موثّق={v.get('fully_grounded')}")
+                f"(موسومة {flagged}) | موثّق={v.get('fully_grounded')} "
+                f"| {llm.get('backend')}:{llm.get('model')} | {d.get('meta', {}).get('took_ms')}ms")
     return ""
 
 

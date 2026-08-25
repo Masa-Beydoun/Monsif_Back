@@ -1,0 +1,41 @@
+بناء فهرس العقود من R:\5th_year\GP\back\Monsif_Back\data\contracts\hammurabi_templates_flat.json ...
+نموذج الـ Embedding: intfloat/multilingual-e5-large
+[contracts] تجهيز 211 نموذج عقد ...
+[contracts] تحميل نموذج خاص بالعقود: intfloat/multilingual-e5-large ...
+Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+Traceback (most recent call last):
+  File "R:\5th_year\GP\back\Monsif_Back\scripts\build_contracts_index.py", line 56, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\scripts\build_contracts_index.py", line 45, in main
+    rag.build_from_json(args.json, save=True)
+  File "R:\5th_year\GP\back\Monsif_Back\services\contracts_rag.py", line 147, in build_from_json
+    model = _get_encoder()
+            ^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\services\contracts_rag.py", line 59, in _get_encoder
+    _own_encoder = SentenceTransformer(
+                   ^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sentence_transformers\SentenceTransformer.py", line 308, in __init__
+    modules, self.module_kwargs = self._load_sbert_model(
+                                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sentence_transformers\SentenceTransformer.py", line 1739, in _load_sbert_model
+    module = module_class(model_name_or_path, cache_dir=cache_folder, backend=self.backend, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sentence_transformers\models\Transformer.py", line 81, in __init__
+    self._load_model(model_name_or_path, config, cache_dir, backend, is_peft_model, **model_args)
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sentence_transformers\models\Transformer.py", line 181, in _load_model
+    self.auto_model = AutoModel.from_pretrained(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\transformers\models\auto\auto_factory.py", line 571, in from_pretrained
+    return model_class.from_pretrained(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\transformers\modeling_utils.py", line 279, in _wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\transformers\modeling_utils.py", line 4260, in from_pretrained
+    checkpoint_files, sharded_metadata = _get_resolved_checkpoint_files(
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\transformers\modeling_utils.py", line 1100, in _get_resolved_checkpoint_files
+    raise EnvironmentError(
+OSError: intfloat/multilingual-e5-large does not appear to have a file named pytorch_model.bin, model.safetensors, tf_model.h5, model.ckpt or flax_model.msgpack.

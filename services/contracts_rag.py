@@ -294,6 +294,65 @@ class ContractsRAG:
             counts[rec["category"]] = counts.get(rec["category"], 0) + 1
         return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
 
+    # التصفّح: قائمة كل النماذج بدون بحث دلالي
+
+    def list_contracts(self, q: Optional[str] = None, category: Optional[str] = None,
+                       page: int = 1, per_page: Optional[int] = None) -> Dict:
+        """قائمة نماذج العقود، مع تصفية نصية بسيطة (contains) وحسب الفئة.
+
+        على خلاف search()، لا تستدعي نموذج الترميز إطلاقاً — للتصفّح الفوري.
+        """
+        if not self._ready:
+            raise RuntimeError("فهرس العقود غير محمّل.")
+
+        q = (q or "").strip() or None
+        category = (category or "").strip() or None
+
+        selected = self.records
+        if category:
+            selected = [r for r in selected if r["category"] == category]
+        if q:
+            selected = [
+                r for r in selected
+                if q in r["subject"] or q in r["category"]
+                or q in (r["index_keywords"] or "") or q in str(r["doc_id"])
+            ]
+
+        total_matched = len(selected)
+
+        page = max(1, int(page or 1))
+        if per_page:
+            per_page = max(1, int(per_page))
+            total_pages = max(1, (total_matched + per_page - 1) // per_page)
+            start = (page - 1) * per_page
+            selected = selected[start:start + per_page]
+        else:
+            total_pages = 1
+
+        contracts = [
+            {
+                "doc_id": r["doc_id"],
+                "category": r["category"],
+                "subject": r["subject"],
+                "index_keywords": r["index_keywords"],
+                "placeholders_count": len(r["placeholders"]),
+            }
+            for r in selected
+        ]
+
+        return {
+            "count": len(contracts),
+            "total_matched": total_matched,
+            "total_contracts": len(self.records),
+            "categories": self.categories(),
+            "pagination": {
+                "page": page, "per_page": per_page,
+                "total_pages": total_pages, "total": total_matched,
+            },
+            "filters_used": {"q": q, "category": category},
+            "contracts": contracts,
+        }
+
 
 # طبقة النموذج اللغوي: اقتراح الأنسب من المرشحين
 
@@ -451,6 +510,10 @@ def search_contracts(query_text: str, **kw) -> Dict:
 
 def get_contract(doc_id: Optional[str] = None, subject: Optional[str] = None) -> Optional[Dict]:
     return get_rag().get_contract(doc_id=doc_id, subject=subject)
+
+
+def list_contracts(**kw) -> Dict:
+    return get_rag().list_contracts(**kw)
 
 
 def is_loaded() -> bool:

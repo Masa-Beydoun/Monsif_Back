@@ -30,6 +30,39 @@ def _coerce(data: dict) -> dict:
     return out
 
 
+@contracts_bp.route("/contracts", methods=["GET"])
+def list_contracts():
+    """
+    GET /api/legal/contracts
+        ?q=إيجار              بحث نصي في العنوان/الفئة/الكلمات الدلالية/المعرّف (اختياري)
+        &category=عقود الإيجار تصفية حسب فئة النموذج (اختياري)
+        &page=1&per_page=50   ترقيم صفحات اختياري
+
+    تصفّح كل نماذج العقود دون بحث دلالي (لا يستدعي نموذج الترميز).
+    """
+    args = request.args
+    try:
+        page = int(args.get("page", 1))
+        per_page = int(args["per_page"]) if args.get("per_page") else None
+    except (TypeError, ValueError) as e:
+        return jsonify({"status": "error",
+                        "error": f"قيمة غير صالحة لأحد البارامترات: {e}"}), 400
+
+    try:
+        data = contracts_rag.list_contracts(
+            q=args.get("q") or None,
+            category=args.get("category") or None,
+            page=page,
+            per_page=per_page,
+        )
+        return jsonify({"status": "success", "data": data}), 200
+    except FileNotFoundError as e:
+        return jsonify({"status": "error", "error": str(e)}), 503
+    except Exception as e:
+        return jsonify({"status": "error",
+                        "error": f"حدث خطأ غير متوقع أثناء معالجة الطلب: {e}"}), 500
+
+
 @contracts_bp.route("/contracts/search", methods=["POST"])
 def search_contracts():
     """

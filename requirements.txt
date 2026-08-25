@@ -20,12 +20,19 @@ rank-bm25==0.2.2
 
 # -- Part A: laws RAG (dense + sparse via Qdrant) ----------------------------
 FlagEmbedding==1.3.4
-qdrant-client==1.12.1
+qdrant-client==1.19.0
 peft==0.14.0
 
 # -- Part C: preliminary ruling ----------------------------------------------
-groq==0.13.0
+# النموذج اللغوي يُستدعى عبر HTTP متوافق مع OpenAI (services/llm_client.py):
+#   LLM_BACKEND=hf   → router.huggingface.co  (Llama 3.1 بلا تنزيل أوزان)
+#   LLM_BACKEND=groq → api.groq.com
+# فلا يلزم أي SDK خاص بالمزوّد، فقط requests.
+requests==2.32.3
 joblib==1.5.3
+
+# مطلوب فقط لطبقة اقتراح نماذج العقود التي لم تُهاجَر بعد إلى llm_client.
+groq==0.13.0
 
 # -- Optional: long-query decomposition via Gemini (LAWS_DECOMPOSE=true) -----
 # google-genai==0.8.0

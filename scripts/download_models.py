@@ -27,7 +27,7 @@ def fetch(repo_id: str, retries: int, wait: int) -> bool:
             path = snapshot_download(
                 repo_id=repo_id,
                 # ملفات غير مستخدمة (أوزان TF/Flax/ONNX)؛ استبعادها يوفّر مساحة كبيرة.
-                ignore_patterns=["*.h5", "*.msgpack", "*.onnx", "onnx/*", "*.ot"],
+                ignore_patterns=["*.h5", "*.msgpack", "*.ot"],
                 max_workers=4,
             )
             print(f"  تم: {path}", flush=True)

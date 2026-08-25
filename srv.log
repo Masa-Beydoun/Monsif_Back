@@ -1,0 +1,59 @@
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator LinearSVC from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator LabelBinarizer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator OneVsRestClassifier from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator TfidfTransformer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator TfidfVectorizer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator MultiLabelBinarizer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+[app] تحميل كسول: تُحمَّل النماذج عند أول طلب لكل ميزة.
+ * Serving Flask app 'app'
+ * Debug mode: on
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:5000
+Press CTRL+C to quit
+[llm] فشلت الواجهة الأساسية hf (HTTP 402)؛ التحويل إلى openrouter:meta-llama/llama-3.3-70b-instruct.
+[laws] تحميل المجموعة من R:\5th_year\GP\back\Monsif_Back\data\laws\articles_unified.jsonl ...
+[laws] 2278 مادة | 272 مادة لها ارتباطات (555 حافة) — 0.1s
+[laws] فهرس Qdrant جاهز: 2278 نقطة
+[models] تحميل BGE-M3 (dense+sparse): BAAI/bge-m3 ...
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 6086.35it/s]
+[models] جاهز (3.9s, device=cpu)
+You're using a XLMRobertaTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+[models] تحميل الـ Re-ranker: BAAI/bge-reranker-v2-m3 ...
+[models] جاهز (1.6s, device=cpu)
+[cases] الفهرس الهجين محمّل: 301 عنصر
+[models] تحميل نموذج الـ Embedding: BAAI/bge-m3 ...
+[models] جاهز (6.5s, device=cpu)
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator LinearSVC from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator LabelBinarizer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator OneVsRestClassifier from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator TfidfTransformer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator TfidfVectorizer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+R:\5th_year\GP\back\Monsif_Back\venv\Lib\site-packages\sklearn\base.py:525: InconsistentVersionWarning: Trying to unpickle estimator MultiLabelBinarizer from version 1.6.1 when using version 1.9.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+[judgment] المصنّف الإحصائي جاهز.
+[llm] فشلت الواجهة الأساسية hf (HTTP 402)؛ التحويل إلى openrouter:meta-llama/llama-3.3-70b-instruct.
+[llm] فشلت الواجهة الأساسية hf (HTTP 402)؛ التحويل إلى openrouter:meta-llama/llama-3.3-70b-instruct.
+127.0.0.1 - - [25/Aug/2026 02:12:52] "POST /api/legal/judgment/predict HTTP/1.1" 200 -

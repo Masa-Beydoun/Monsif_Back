@@ -8,6 +8,7 @@ cross-encoder ← تطبيق عتبة التشابه.
 قابلة للتمرير مع كل استدعاء.
 """
 
+import hashlib
 import json
 import os
 import pickle
@@ -116,11 +117,42 @@ class CasesRAG:
         facts = item.get("facts_text", "")
         return str(facts).strip() if facts else "لا توجد وقائع مسجلة"
 
+    # المعرّف الفريد وإزالة التكرار
+    #
+    # ‏case_number ليس مفتاحاً فريداً في هذه المجموعة: 48 رقماً يتكرر مرتين،
+    # و47 منها قضايا **مختلفة فعلاً** تشترك بالرقم (مثلاً 510 = دخول غير مشروع
+    # في صف، وشيك بلا رصيد في صف آخر، تشابه وقائعهما 12% فقط). لذلك أي إزالة
+    # تكرار على أساس الرقم تحذف قضايا حقيقية.
+    #
+    # ‏file_name فريد فعلاً (301/301) فيصلح معرّفاً مستقراً، والتكرار الحقيقي
+    # يُكشف بمحتوى القضية لا برقمها: تجزئة الوقائع والحكم والادعاء تُسقط صفّين
+    # فقط من أصل 301 — القضية 579 المُدخَلة مرتين، والقضيتان 730/731 وهما نفس
+    # المحتوى تحت رقمين.
+
+    @staticmethod
+    def _content_key(item: Dict) -> str:
+        raw = "|".join(str(item.get(f, "")) for f in
+                       ("facts_text", "judgment_text", "claims_text"))
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _dedupe(cls, items: List[Dict]) -> List[Dict]:
+        """يُبقي أول ظهور لكل محتوى، محافظاً على الترتيب الوارد."""
+        seen, unique = set(), []
+        for item in items:
+            key = cls._content_key(item)
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        return unique
+
     @staticmethod
     def _to_result(item: Dict, score: float) -> Dict:
         outcome = item.get("outcome")
         return {
             "case_number": item.get("case_number", "N/A"),
+            # المعرّف الفريد الذي تعتمد عليه الواجهة كمفتاح صف، لا case_number.
+            "case_uid": item.get("file_name") or str(item.get("case_number", "")),
             "file_name": item.get("file_name", ""),
             "similarity_score": score,
             "decision_year": item.get("decision_year", ""),
@@ -176,6 +208,8 @@ class CasesRAG:
         candidates = self.store.search_hybrid(query_text, top_k=p["hybrid_top_k"])
         if not candidates:
             return []
+        # قبل إعادة الترتيب لا بعدها: توفير تمريرة cross-encoder على الصف المكرر.
+        candidates = self._dedupe(candidates)
 
         reranker = model_registry.get_reranker()
         pairs = [[query_text, self._build_text(it)] for it in candidates]

@@ -23,6 +23,48 @@ class IndexNotBuilt(RuntimeError):
     """الفهرس غير مبني أو ناقص؛ يحوّلها الـ route إلى 503 مع رسالة الإصلاح."""
 
 
+# عتبات جودة النتائج
+
+def apply_score_cutoffs(results: List, p: Dict) -> List:
+    """تصفية نتائج إعادة الترتيب على ثلاث مراحل.
+
+    1) عتبة مطلقة  (min_score)       — تُسقط ما دون رقم ثابت.
+    2) عتبة نسبية  (min_score_ratio) — تُسقط ما دون نسبة من أعلى نتيجة.
+    3) قصّ الهبوط  (score_drop_ratio) — يقطع الذيل عند أول فجوة كبيرة بين
+       نتيجتين متتاليتين، فلا تُعاد المواد الضعيفة الملحقة بنتيجة قوية.
+
+    تُبقى المادة الأولى دائماً ما دامت اجتازت العتبة المطلقة: الفجوة تقاس
+    بين النتائج، ولا معنى لقياسها على أعلى نتيجة وحدها.
+    المدخل مرتّب تنازلياً أصلاً من rerank().
+    """
+    if not results:
+        return results
+
+    min_score = float(p.get("min_score") or 0.0)
+    kept = [r for r in results if r.score >= min_score]
+    if not kept:
+        return []
+
+    top = kept[0].score
+
+    ratio = float(p.get("min_score_ratio") or 0.0)
+    if ratio > 0 and top > 0:
+        floor = top * ratio
+        kept = [r for r in kept if r.score >= floor]
+
+    drop = float(p.get("score_drop_ratio") or 0.0)
+    if drop > 0:
+        cut = len(kept)
+        for i in range(1, len(kept)):
+            previous = kept[i - 1].score
+            if previous > 0 and kept[i].score < previous * drop:
+                cut = i
+                break
+        kept = kept[:cut]
+
+    return kept
+
+
 # تطبيع النص العربي
 
 DIACRITICS_RE = re.compile(
@@ -402,7 +444,7 @@ class LawsRAG:
 
         results = self.rerank(query, pooled, top_n=p["top_n"],
                               max_length=p["rerank_max_length"])
-        results = [r for r in results if r.score >= p["min_score"]]
+        results = apply_score_cutoffs(results, p)
 
         if results and p["with_dependencies"]:
             results = self.attach_dependencies(

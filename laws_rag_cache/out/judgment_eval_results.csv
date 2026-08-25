@@ -1,0 +1,4 @@
+case_id,complexity,parse_error,predicted_outcome,expected_outcome,outcome_correct,article_precision,article_recall,article_f1,fully_grounded,n_quote_flags,n_unknown_citations,n_precedent_mismatches,version,latency_sec
+g01,easy,False,إسقاط دعوى,إدانة,False,0.0,0.0,0.0,True,0,0,0,v1_irac,4.3
+g01,easy,True,خطأ/None,إدانة,False,0.0,0.0,0.0,False,0,0,0,v2_pljp,6.2
+g01,easy,False,إسقاط دعوى,إدانة,False,0.0,0.0,0.0,True,0,0,0,v3_adapt,8.0
