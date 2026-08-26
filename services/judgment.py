@@ -263,9 +263,24 @@ def _record_llm_call(stage: str, used: Dict) -> None:
     entries = getattr(_call_log, "entries", None)
     if entries is None:
         return
-    entry = {"stage": stage}
+    entry = {"stage": stage, "ok": True}
     entry.update(used)
     entries.append(entry)
+
+
+def _record_llm_failure(stage: str, backend: str, model: str, error: Exception) -> None:
+    """يسجّل استدعاءً فاشلاً بالكامل (كل المفاتيح + الاحتياطية استُنفدت).
+
+    بدون هذا، فشل استدعاء النموذج اللغوي يختفي تماماً من meta.llm.served_by —
+    فيظهر للمستخدم أن لا شيء حدث بدل معرفة أن OpenRouter (مثلاً) هو من فشل ولماذا.
+    """
+    entries = getattr(_call_log, "entries", None)
+    if entries is None:
+        return
+    entries.append({
+        "stage": stage, "ok": False, "backend": backend, "model": model,
+        "error": str(error)[:300], "status_code": getattr(error, "status_code", None),
+    })
 
 
 def _chat_json(messages: List[Dict], cfg: JudgmentConfig, max_tokens: int,
@@ -286,6 +301,7 @@ def _chat_json(messages: List[Dict], cfg: JudgmentConfig, max_tokens: int,
         raise
     except llm_client.LLMError as e:
         print(f"[judgment] {e}", flush=True)
+        _record_llm_failure(stage, backend, model, e)
         return None
     finally:
         if used:
@@ -910,10 +926,25 @@ class LegalJudgmentPredictor:
                                 temperature=cfg.temperature, stage="judgment")
 
         if not isinstance(raw_result, dict):
+            calls = get_llm_call_log()
+            last_call = calls[-1] if calls else {}
+            # يُفرَّق بين عطبين مختلفين تماماً: الاستدعاء نفسه فشل (كل مفاتيح
+            # OpenRouter + الاحتياطية استُنفدت) مقابل استدعاء نجح لكن الناتج
+            # ليس JSON صالحاً. بدون هذا التمييز تظهر رسالة "لم يُعِد مخرجاً
+            # صالحاً" حتى عند عطل شبكة/مفتاح كامل، فيبدو الخلل في النموذج لا
+            # في الواجهة (OpenRouter مثلاً).
+            if last_call.get("ok") is False:
+                return {
+                    "error": "llm_error",
+                    "message": f"فشل استدعاء النموذج اللغوي: {last_call.get('error')}",
+                    "llm_calls": calls,
+                    "retrieved_statutes": [r.to_dict() for r in context["retrieved_laws"]],
+                    "retrieved_cases": context["retrieved_cases"],
+                }
             return {
                 "error": "parsing_error",
-                "message": "لم يُعِد النموذج اللغوي مخرجاً صالحاً. يرجى إعادة المحاولة.",
-                "llm_calls": get_llm_call_log(),
+                "message": "استُدعي النموذج اللغوي بنجاح لكنه لم يُعِد JSON صالحاً. يرجى إعادة المحاولة.",
+                "llm_calls": calls,
                 "retrieved_statutes": [r.to_dict() for r in context["retrieved_laws"]],
                 "retrieved_cases": context["retrieved_cases"],
             }
@@ -982,8 +1013,13 @@ def build_api_payload(result: Dict, cfg: JudgmentConfig, took_ms: int) -> Dict:
     """
     backend, model = resolve_llm(cfg)
     calls = result.get("_llm_calls") or result.get("llm_calls") or []
+    # ok/error يظهران هنا حتى عند فشل الاستدعاء بالكامل (كل مفاتيح OpenRouter
+    # + الاحتياطية)، وإلا يختفي عطل الواجهة تماماً من الاستجابة ويبدو وكأن
+    # شيئاً لم يحدث بينما المعلومات فعلياً ناقصة بسببه.
     served = [{"stage": c.get("stage"), "backend": c.get("backend"),
-               "model": c.get("model")} for c in calls]
+               "model": c.get("model"), "ok": c.get("ok", True),
+               "error": c.get("error")} for c in calls]
+    failed = [c for c in served if not c["ok"]]
     meta = {
         "took_ms": took_ms,
         "llm": {
@@ -992,6 +1028,7 @@ def build_api_payload(result: Dict, cfg: JudgmentConfig, took_ms: int) -> Dict:
             "model": model,
             "fallback_used": any(c.get("fallback_used") for c in calls),
             "calls": len(calls),
+            "failed_calls": len(failed),
             "served_by": served,
         },
         "pipeline": {

@@ -53,6 +53,7 @@ _BACKENDS = {
         "label": "HuggingFace Inference Providers",
         "base_url": lambda: config.HF_BASE_URL,
         "api_key": lambda: config.HF_TOKEN,
+        "api_keys": lambda: _non_empty(config.HF_TOKEN),
         "default_model": lambda: config.HF_MODEL,
         "key_env": "HF_TOKEN",
         "key_hint": "HF_TOKEN=hf_...    (من https://huggingface.co/settings/tokens)",
@@ -61,6 +62,7 @@ _BACKENDS = {
         "label": "Groq",
         "base_url": lambda: config.GROQ_BASE_URL,
         "api_key": lambda: config.GROQ_API_KEY,
+        "api_keys": lambda: _non_empty(config.GROQ_API_KEY),
         "default_model": lambda: config.GROQ_MODEL,
         "key_env": "GROQ_API_KEY",
         "key_hint": "GROQ_API_KEY=gsk_...  (من https://console.groq.com/keys)",
@@ -68,23 +70,37 @@ _BACKENDS = {
     # قيس من شبكة المشروع: Groq وحده يردّ 403 «Access denied» قبل قراءة المفتاح
     # أصلاً (حجب على مستوى الشبكة)، بينما الواجهتان أدناه تستجيبان طبيعياً ولا
     # ينقصهما إلا مفتاح. كلتاهما متوافقة مع OpenAI فتعملان بنفس المسار تماماً.
+    #
+    # OpenRouter تحديداً يدعم حتى ثلاثة مفاتيح (ثلاثة حسابات منفصلة): إن نفدت
+    # حصة أحدها (401/402/403/429) يُجرَّب التالي تلقائياً قبل اللجوء لواجهة
+    # مزوّد أخرى بالكامل. للتعديل الفوري: غيّري القيم في .env وأعيدي تشغيل
+    # الخادم فقط — لا حاجة لمسّ هذا الملف.
     "openrouter": {
         "label": "OpenRouter",
         "base_url": lambda: config.OPENROUTER_BASE_URL,
         "api_key": lambda: config.OPENROUTER_API_KEY,
+        "api_keys": lambda: _non_empty(
+            config.OPENROUTER_API_KEY, config.OPENROUTER_API_KEY_2, config.OPENROUTER_API_KEY_3),
         "default_model": lambda: config.OPENROUTER_MODEL,
         "key_env": "OPENROUTER_API_KEY",
-        "key_hint": "OPENROUTER_API_KEY=sk-or-...  (من https://openrouter.ai/keys)",
+        "key_hint": ("OPENROUTER_API_KEY=sk-or-...            (من https://openrouter.ai/keys)\n"
+                     "    OPENROUTER_API_KEY_2=sk-or-...          (حساب ثانٍ، اختياري)\n"
+                     "    OPENROUTER_API_KEY_3=sk-or-...          (حساب ثالث، اختياري)"),
     },
     "gemini": {
         "label": "Google Gemini",
         "base_url": lambda: config.GEMINI_BASE_URL,
         "api_key": lambda: config.GOOGLE_API_KEY,
+        "api_keys": lambda: _non_empty(config.GOOGLE_API_KEY),
         "default_model": lambda: config.GEMINI_MODEL,
         "key_env": "GOOGLE_API_KEY",
         "key_hint": "GOOGLE_API_KEY=...  (من https://aistudio.google.com/apikey)",
     },
 }
+
+
+def _non_empty(*keys: str) -> List[str]:
+    return [k.strip() for k in keys if k and k.strip()]
 
 
 def available_backends() -> List[str]:
@@ -109,7 +125,7 @@ def is_configured(backend: Optional[str] = None) -> bool:
         name, _ = resolve(backend)
     except LLMError:
         return False
-    return bool(_BACKENDS[name]["api_key"]())
+    return bool(_BACKENDS[name]["api_keys"]())
 
 
 def status() -> Dict:
@@ -125,22 +141,23 @@ def status() -> Dict:
                 "base_url": spec["base_url"](),
                 "default_model": spec["default_model"](),
                 "key_env": spec["key_env"],
-                "key_set": bool(spec["api_key"]()),
+                "key_set": bool(spec["api_keys"]()),
+                "keys_configured": len(spec["api_keys"]()),
             }
             for name, spec in _BACKENDS.items()
         },
     }
 
 
-def _require_key(name: str) -> str:
+def _require_keys(name: str) -> List[str]:
     spec = _BACKENDS[name]
-    key = spec["api_key"]()
-    if not key:
+    keys = spec["api_keys"]()
+    if not keys:
         raise MissingAPIKey(
             f"{spec['key_env']} غير مضبوط، وهو مطلوب لواجهة «{spec['label']}». "
             f"أضيفيه لملف .env بجذر المشروع:\n    {spec['key_hint']}"
         )
-    return key
+    return keys
 
 
 # استخراج JSON متسامح
@@ -213,20 +230,31 @@ _MODEL_UNAVAILABLE_RE = re.compile(
     r"|is not a chat model|no provider", re.I)
 
 
+# أعطال تخص المفتاح نفسه لا الطلب: نفاد الحصة (402/429) أو مفتاح تالف/ناقص
+# الصلاحيات (401/403). حين تتوفر عدة مفاتيح لنفس الواجهة (OpenRouter) يُجرَّب
+# التالي منها فوراً بلا انتظار، إذ لا فائدة من إعادة محاولة مفتاح مستنفَد.
+_KEY_EXHAUSTED_STATUS = {401, 402, 403, 429}
+
+
 def _attempt(messages: List[Dict], *, backend: Optional[str] = None,
              model: Optional[str] = None, max_tokens: int = 1024,
              temperature: float = 0.0, json_mode: bool = True,
              timeout: Optional[int] = None,
              max_retries: Optional[int] = None) -> str:
-    """استدعاء واجهة واحدة وإرجاع النص الخام. يرمي LLMError عند الفشل."""
+    """استدعاء واجهة واحدة وإرجاع النص الخام. يرمي LLMError عند الفشل.
+
+    عند توفّر أكثر من مفتاح لنفس الواجهة (OpenRouter بثلاثة حسابات مثلاً)،
+    يُجرَّب كل مفتاح على حدة: 5xx/انقطاع الشبكة تُعاد محاولتها على نفس المفتاح
+    بتراجع أسّي كالسابق، أما استنفاد المفتاح (401/402/403/429) فيبدّل فوراً
+    إلى المفتاح التالي دون انتظار.
+    """
     import requests
 
     name, model_id = resolve(backend, model)
     spec = _BACKENDS[name]
-    key = _require_key(name)
+    keys = _require_keys(name)
 
     url = spec["base_url"]().rstrip("/") + "/chat/completions"
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {
         "model": model_id,
         "messages": messages,
@@ -244,80 +272,89 @@ def _attempt(messages: List[Dict], *, backend: Optional[str] = None,
     timeout = timeout or config.LLM_TIMEOUT
     attempts = max(1, max_retries or config.LLM_MAX_RETRIES)
     last_error = ""
+    last_status: Optional[int] = None
 
-    for attempt in range(attempts):
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        except Exception as e:                      # شبكة أو مهلة
-            last_error = f"تعذّر الاتصال بـ{spec['label']}: {e}"
-            if attempt + 1 < attempts:
+    for key_index, key in enumerate(keys):
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        key_label = f"{spec['label']}" if len(keys) == 1 else f"{spec['label']} (مفتاح {key_index + 1}/{len(keys)})"
+
+        for attempt in range(attempts):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            except Exception as e:                      # شبكة أو مهلة
+                last_error = f"تعذّر الاتصال بـ{key_label}: {e}"
+                last_status = None
+                if attempt + 1 < attempts:
+                    time.sleep(2 ** attempt)
+                    continue
+                break  # جرّبي المفتاح التالي إن وُجد
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"] or ""
+                except Exception as e:
+                    raise LLMError(f"استجابة غير متوقعة من {spec['label']}: {e}",
+                                   status_code=200, backend=name)
+
+            body = response.text[:400]
+
+            # يُفحص قبل إسقاط المعاملات: وإلا استُهلكت محاولة على إسقاط
+            # response_format بينما السبب الحقيقي أن النموذج غير مخدوم أصلاً.
+            # هذا عطل نموذج لا عطل مفتاح، فلا فائدة من تبديل المفتاح.
+            if response.status_code in (400, 404) and _MODEL_UNAVAILABLE_RE.search(body):
+                raise LLMError(
+                    f"النموذج «{model_id}» غير متاح على {spec['label']} "
+                    f"(HTTP {response.status_code}). جرّبي اسماً آخر أو واجهة أخرى.\n{body}",
+                    status_code=404, backend=name)
+
+            # مزوّدون كثر لا يدعمون هذين المعاملين؛ نسقطهما ونعيد المحاولة فوراً.
+            if response.status_code in (400, 422) and "reasoning_effort" in payload:
+                print(f"[llm] {name}: المزوّد لا يدعم reasoning_effort؛ سيُعاد الطلب بدونه.",
+                      flush=True)
+                payload.pop("reasoning_effort", None)
+                continue
+            if json_mode and response.status_code in (400, 422) and "response_format" in payload:
+                print(f"[llm] {name}: المزوّد لا يدعم response_format؛ "
+                      f"سيُعاد الطلب بدونه ويُستخرَج الـ JSON من النص.", flush=True)
+                payload.pop("response_format", None)
+                continue
+
+            if response.status_code == 404:
+                raise LLMError(
+                    f"النموذج «{model_id}» غير متاح على {spec['label']} (HTTP 404). "
+                    f"جرّبي اسماً آخر عبر متغيّر البيئة، أو غيّري الواجهة.\n{body}",
+                    status_code=404, backend=name)
+
+            last_status = response.status_code
+            if response.status_code in _KEY_EXHAUSTED_STATUS:
+                last_error = f"{key_label} أعاد HTTP {response.status_code}: {body}"
+                if key_index + 1 < len(keys):
+                    print(f"[llm] {last_error}\n"
+                          f"      سيُجرَّب المفتاح التالي ({key_index + 2}/{len(keys)}) فوراً.",
+                          flush=True)
+                break  # التالي: مفتاح جديد، لا فائدة من إعادة محاولة هذا
+
+            last_error = f"{spec['label']} أعاد HTTP {response.status_code}: {body}"
+            if response.status_code in _RETRYABLE_STATUS and attempt + 1 < attempts:
                 time.sleep(2 ** attempt)
                 continue
-            raise LLMError(last_error, status_code=None, backend=name)
+            raise LLMError(last_error, status_code=response.status_code, backend=name)
+        # استُنفدت محاولات هذا المفتاح (أو استُنفد هو نفسه) -> جرّبي التالي
 
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                return data["choices"][0]["message"]["content"] or ""
-            except Exception as e:
-                raise LLMError(f"استجابة غير متوقعة من {spec['label']}: {e}",
-                               status_code=200, backend=name)
-
-        body = response.text[:400]
-
-        # يُفحص قبل إسقاط المعاملات: وإلا استُهلكت محاولة على إسقاط
-        # response_format بينما السبب الحقيقي أن النموذج غير مخدوم أصلاً.
-        if response.status_code in (400, 404) and _MODEL_UNAVAILABLE_RE.search(body):
-            raise LLMError(
-                f"النموذج «{model_id}» غير متاح على {spec['label']} "
-                f"(HTTP {response.status_code}). جرّبي اسماً آخر أو واجهة أخرى.\n{body}",
-                status_code=404, backend=name)
-
-        # مزوّدون كثر لا يدعمون هذين المعاملين؛ نسقطهما ونعيد المحاولة فوراً.
-        if response.status_code in (400, 422) and "reasoning_effort" in payload:
-            print(f"[llm] {name}: المزوّد لا يدعم reasoning_effort؛ سيُعاد الطلب بدونه.",
-                  flush=True)
-            payload.pop("reasoning_effort", None)
-            continue
-        if json_mode and response.status_code in (400, 422) and "response_format" in payload:
-            print(f"[llm] {name}: المزوّد لا يدعم response_format؛ "
-                  f"سيُعاد الطلب بدونه ويُستخرَج الـ JSON من النص.", flush=True)
-            payload.pop("response_format", None)
-            continue
-
-        # 401 و403 سببان مختلفان تماماً، وخلطهما يضيّع وقتاً في التشخيص:
-        # 401 = المفتاح نفسه غير صالح (خطأ نسخ، أو أُلغي من لوحة المزوّد).
-        # 403 = المفتاح صالح لكن صلاحياته لا تكفي لهذا النداء تحديداً.
-        if response.status_code == 401:
-            raise MissingAPIKey(
-                status_code=401, backend=name, message=(
-                f"لم يتعرّف {spec['label']} على المفتاح (HTTP 401 — مفتاح غير صالح). "
-                f"القيمة الحالية لـ {spec['key_env']} إما منسوخة ناقصة أو أُلغيت من "
-                f"لوحة المزوّد. ولّدي مفتاحاً جديداً، ضعيه في .env، ثم أعيدي تشغيل "
-                f"الخادم — الملف يُقرأ عند الإقلاع مرة واحدة.\n{body}")
-            )
-        if response.status_code == 403:
-            raise MissingAPIKey(
-                status_code=403, backend=name, message=(
-                f"المفتاح صالح لكن صلاحياته لا تكفي (HTTP 403). {spec['key_env']} "
-                f"يتعرّف عليه {spec['label']} لكنه لا يسمح بهذا النداء. تحقّقي من "
-                f"أمرين: أن المفتاح مخوّل باستدعاء الاستدلال (Inference Providers)، "
-                f"وأن الحساب موافق على شروط مستودع «{model_id}» إن كان مقيّد "
-                f"الوصول.\n{body}")
-            )
-        if response.status_code == 404:
-            raise LLMError(
-                f"النموذج «{model_id}» غير متاح على {spec['label']} (HTTP 404). "
-                f"جرّبي اسماً آخر عبر متغيّر البيئة، أو غيّري الواجهة.\n{body}",
-                status_code=404, backend=name)
-
-        last_error = f"{spec['label']} أعاد HTTP {response.status_code}: {body}"
-        if response.status_code in _RETRYABLE_STATUS and attempt + 1 < attempts:
-            time.sleep(2 ** attempt)
-            continue
-        raise LLMError(last_error, status_code=response.status_code, backend=name)
-
-    raise LLMError(last_error or "فشل استدعاء النموذج اللغوي.", backend=name)
+    # استُنفدت كل المفاتيح المتاحة لهذه الواجهة
+    if last_status in (401, 403):
+        raise MissingAPIKey(
+            status_code=last_status, backend=name, message=(
+            f"{spec['key_env']}"
+            f"{' وما يليه' if len(keys) > 1 else ''} مرفوض من {spec['label']} "
+            f"(HTTP {last_status}). إما مفتاح غير صالح (401) أو صلاحياته لا "
+            f"تكفي هذا النداء (403). ولّدي مفتاحاً جديداً في .env ثم أعيدي "
+            f"تشغيل الخادم — الملف يُقرأ عند الإقلاع مرة واحدة.\n{last_error}")
+        )
+    raise LLMError(
+        last_error or f"فشل استدعاء {spec['label']} بكل المفاتيح المتاحة.",
+        status_code=last_status, backend=name)
 
 
 # أخطاء تستحق تجربة الواجهة الاحتياطية: نفاد الحصة، تعطّل المزوّد، مفتاح تالف،
@@ -394,15 +431,25 @@ def chat_json(messages: List[Dict], **kw) -> Optional[dict]:
 
 
 def ping(backend: Optional[str] = None, model: Optional[str] = None) -> Dict:
-    """استدعاء تجريبي قصير للتأكد من صحة المفتاح والنموذج قبل تشغيل الميزة."""
+    """استدعاء تجريبي قصير للتأكد من صحة المفتاح والنموذج قبل تشغيل الميزة.
+
+    allow_fallback=False عمداً: الهدف اختبار الواجهة المطلوبة تحديداً (هل
+    OpenRouter نفسه يعمل؟) لا معرفة أن *واجهة ما* تردّ. بدون هذا، فشل
+    OpenRouter الصامت ثم نجاح التحويل التلقائي لـGroq كان يُعاد كـ
+    "ok: true, backend: openrouter" رغم أن OpenRouter لم يخدم الطلب فعلياً —
+    نتيجة مضلِّلة تماماً لمن يفحص هل مفاتيحه تعمل.
+    """
     name, model_id = resolve(backend, model)
     t0 = time.time()
+    used: Dict = {}
     try:
         parsed = chat_json(
             [{"role": "user", "content": 'أعد هذا الكائن حرفياً بصيغة JSON فقط: {"ok": true}'}],
             backend=name, model=model_id, max_tokens=32, temperature=0.0, max_retries=2,
+            allow_fallback=False, used=used,
         )
-        return {"ok": True, "backend": name, "model": model_id,
+        return {"ok": True, "backend": used.get("backend", name),
+                "model": used.get("model", model_id),
                 "json_parsed": isinstance(parsed, dict), "reply": parsed,
                 "took_ms": int((time.time() - t0) * 1000)}
     except LLMError as e:

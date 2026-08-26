@@ -121,10 +121,110 @@ def _status_counts(articles: List[Dict]) -> Dict[str, int]:
     return counts
 
 
+# تحويل نص الإشارة (snippet) إلى نمط بحث متسامح مع اختلافات التطبيع
+#
+# الـ snippet مُستخرَج مسبقاً بمعالجة غير متطابقة تماماً مع body_raw ولا مع
+# body_normalized (يزيل التطويل لكن يُبقي التاء المربوطة مثلاً)، فأي بحث حرفي
+# يفشل في نحو 16% من الحالات. الحل: نمط regex يُطابق فئات الحروف المتكافئة
+# (الألف بأشكالها، التاء المربوطة/الهاء، الياء/الألف المقصورة، الهمزات) ويقبل
+# تطويلاً اختيارياً بين أي حرفين ومسافات متعددة مكان أي مسافة — مطابقة 100%
+# على كامل المجموعة (568 إشارة) مهما كان حقل العرض المُستعمَل.
+_ALEF_CHARS = "اأإآ"
+_TAH_CHARS = "ةه"
+_YEH_CHARS = "ىي"
+_HAMZA_CHARS = "ؤئء"
+
+
+def _tolerant_pattern(snippet: str) -> str:
+    parts = []
+    for ch in snippet:
+        if ch in _ALEF_CHARS:
+            parts.append("[" + _ALEF_CHARS + "]")
+        elif ch in _TAH_CHARS:
+            parts.append("[" + _TAH_CHARS + "]")
+        elif ch in _YEH_CHARS:
+            parts.append("[" + _YEH_CHARS + "]")
+        elif ch in _HAMZA_CHARS:
+            parts.append("[" + _HAMZA_CHARS + "]")
+        elif ch.isspace():
+            parts.append(r"\s+")
+        else:
+            parts.append(re.escape(ch))
+    return "ـ?".join(parts)
+
+
+def _body_links(d: Dict, body: str) -> List[Dict]:
+    """مواقع عبارات الإشارة داخل نص المادة (body) مع المادة التي تشير إليها.
+
+    تُجمَّع الإشارات التي تتشارك نفس الـ snippet (كإشارة واحدة لثلاث مواد
+    متتالية: «المواد الـ 19 و 20 و 21») ضمن رابط واحد متعدد الأهداف، لأنها
+    تطابق نفس الموضع في النص أصلاً. يعيد نطاقات غير متداخلة مرتّبة حسب موقع
+    الظهور، جاهزة لتقسيم النص في الواجهة الأمامية إلى نص/رابط/نص...
+    """
+    law_id = d.get("law_id", "")
+    groups: Dict[str, List[Dict]] = {}
+    order: List[str] = []
+    for r in (d.get("references") or []):
+        if not r.get("resolved") or not r.get("snippet"):
+            continue
+        target = str(r.get("target") or "")
+        target_article_id = f"{law_id}:{target}"
+        if target_article_id not in _by_article_id:
+            continue
+        snippet = r["snippet"]
+        if snippet not in groups:
+            groups[snippet] = []
+            order.append(snippet)
+        groups[snippet].append({
+            "article_id": target_article_id,
+            "article_number": target,
+            "law_id": law_id,
+            "confidence": r.get("confidence"),
+        })
+
+    spans: List[Dict] = []
+    for snippet in order:
+        m = re.search(_tolerant_pattern(snippet), body)
+        if not m:
+            continue
+        spans.append({
+            "start": m.start(),
+            "end": m.end(),
+            "text": body[m.start():m.end()],
+            "targets": groups[snippet],
+        })
+
+    # إزالة التداخل: نرتّب حسب الموقع ونُبقي أول نطاق غير متداخل مع سابقه.
+    spans.sort(key=lambda s: (s["start"], -(s["end"] - s["start"])))
+    accepted: List[Dict] = []
+    last_end = -1
+    for span in spans:
+        if span["start"] >= last_end:
+            accepted.append(span)
+            last_end = span["end"]
+    return accepted
+
+
+# تنظيف نص المادة الخام للعرض: إزالة أحرف الإفلات (\r \n \t) فقط، بلا أي
+# استبدال للحروف (لا تُمس ة/ه أو ى/ي أو الهمزات) حتى يبقى النص مطابقاً تماماً
+# لشكل عبارات الإشارة (snippets) في قائمة المراجع.
+_ESCAPE_WS_RE = re.compile(r"[\r\n\t]+")
+_MULTI_SPACE_RE = re.compile(r" {2,}")
+
+
+def _display_body(raw: str) -> str:
+    if not raw:
+        return ""
+    text = _ESCAPE_WS_RE.sub(" ", raw)
+    text = _MULTI_SPACE_RE.sub(" ", text)
+    return text.strip()
+
+
 # تحويل مادة واحدة إلى قاموس الاستجابة
 
 def article_to_dict(d: Dict, include_body: bool = True) -> Dict:
-    """كل معلومات المادة. body_normalized هو النص المفضّل للعرض."""
+    """كل معلومات المادة. body هو النص الخام (body_raw) بعد إزالة أحرف الإفلات فقط،
+    ليطابق شكل عبارات الإشارة (snippets) في قائمة المراجع."""
     out = {
         "article_id": d.get("article_id", ""),
         "law_id": d.get("law_id", ""),
@@ -142,9 +242,11 @@ def article_to_dict(d: Dict, include_body: bool = True) -> Dict:
         "source_article_id": d.get("source_article_id"),
     }
     if include_body:
-        out["body"] = d.get("body_normalized") or d.get("body_raw") or ""
+        body = _display_body(d.get("body_raw") or "") or d.get("body_normalized") or ""
+        out["body"] = body
         out["body_raw"] = d.get("body_raw") or ""
         out["body_normalized"] = d.get("body_normalized") or ""
+        out["body_links"] = _body_links(d, body)
     return out
 
 

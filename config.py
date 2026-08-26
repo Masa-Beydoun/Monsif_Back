@@ -193,7 +193,12 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
 # واجهتان متوافقتان مع OpenAI، تأكّد وصولهما من شبكة المشروع (بخلاف Groq).
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+# حتى ثلاثة مفاتيح (ثلاثة حسابات) يُدار التبديل بينها تلقائياً عند نفاد حصة
+# أحدها (401/402/403/429) قبل اللجوء للواجهة الاحتياطية الأخرى. للتعديل: غيّري
+# القيمة في .env وأعيدي تشغيل الخادم — لا حاجة لمسّ الكود.
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_API_KEY_2 = os.getenv("OPENROUTER_API_KEY_2", "")
+OPENROUTER_API_KEY_3 = os.getenv("OPENROUTER_API_KEY_3", "")
 
 GEMINI_BASE_URL = os.getenv(
     "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")

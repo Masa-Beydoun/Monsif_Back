@@ -2,6 +2,7 @@ import config
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from routes.cases_catalog_routes import cases_catalog_bp
 from routes.cases_rag_routes import cases_rag_bp
 from routes.judgment_routes import judgment_bp
 from routes.law_and_jurisprudence_search_routes import legal_search_bp
@@ -21,6 +22,7 @@ app.register_blueprint(legal_summarization, url_prefix="/api/legal")  # /summari
 app.register_blueprint(legal_search_bp, url_prefix="/api/legal")  # /search
 app.register_blueprint(laws_rag_bp, url_prefix="/api/legal")  # /laws/search
 app.register_blueprint(laws_catalog_bp, url_prefix="/api/legal")  # /laws · /laws/<id>/articles
+app.register_blueprint(cases_catalog_bp, url_prefix="/api/legal")  # /cases · /cases/<uid>
 app.register_blueprint(cases_rag_bp, url_prefix="/api/legal")  # /cases/search
 app.register_blueprint(judgment_bp, url_prefix="/api/legal")  # /judgment/predict
 app.register_blueprint(contracts_bp, url_prefix="/api/legal")  # /contracts/search
@@ -40,6 +42,8 @@ def home():
                 "GET  /api/legal/laws/<law_id>/articles": "مواد قانون معيّن مجمَّعة ضمن تصنيفاتها",
                 "GET  /api/legal/laws/article/<article_id>": "مادة واحدة بكل معلوماتها",
                 "POST /api/legal/laws/search": "RAG المواد القانونية",
+                "GET  /api/legal/cases": "قائمة القضايا مع تصنيف الجرائم وفلترة بالسنة/النتيجة/نص",
+                "GET  /api/legal/cases/<case_uid>": "قضية واحدة بكل أقسامها",
                 "POST /api/legal/cases/search": "RAG السوابق القضائية",
                 "POST /api/legal/judgment/predict": "إصدار حكم أولي (يعتمد على الاتنين فوق)",
                 "GET  /api/legal/judgment/config": "جاهزية الميزة + إعداداتها الافتراضية",

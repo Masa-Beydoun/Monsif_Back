@@ -20,6 +20,10 @@
     {
       "key": "article_id",
       "value": "مرسوم تشريعي رقم 148 لعام 1949 - قانون العقوبات العام:622"
+    },
+    {
+      "key": "case_uid",
+      "value": "400_verified_illegal_entry.docx"
     }
   ],
   "item": [
@@ -63,9 +67,10 @@
     },
     {
       "name": "1. Summarization",
+      "description": "تلخيص وقائع قضية + استخراج حقول بنيوية. منقول من summerization-3.ipynb — خوارزمية استخلاصية (لا نموذج لغوي)، فورية وبلا تكلفة API.",
       "item": [
         {
-          "name": "POST /api/legal/summarize",
+          "name": "POST /api/legal/summarize — نص طويل (summary مُنقَّط)",
           "request": {
             "method": "POST",
             "header": [
@@ -81,7 +86,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"text\": \"بتاريخ 12/05/2023 تقدم المدعي بشكوى ضد المتهم الأول، حيث أفاد أن المتهم قام بكسر باب منزله ليلاً وسرقة مبلغ مالي قدره خمسمئة ألف ليرة. وقد اعترف المتهم أمام النيابة العامة بارتكاب الفعل، وتم ضبط أداة الكسر وبصمات على الباب. وقررت المحكمة إدانة المتهم.\"\n}"
+              "raw": "{\n  \"text\": \"بتاريخ 12/05/2023 حضر المتهم الأول أمام المحكمة وأنكر التهمة المسندة إليه. وكان قد ألقي القبض عليه بعد أن قامت الشرطة بمداهمة منزله وضبط سلاح ناري بحوزته. أفاد المجني عليه أن المتهم اعتدى عليه بالضرب أمام محل تجاري في وسط المدينة. شهد الشاهد الأول بأنه رأى الحادثة بأم عينه وأكد أقوال المجني عليه بالتفصيل. قدم الدفاع طعناً بأدلة الاتهام مشيراً إلى غياب بصمات واضحة على السلاح المضبوط. بعد المداولة، حكمت المحكمة بإدانة المتهم وفق أحكام المادة 555 من قانون العقوبات. قررت المحكمة أيضاً إلزام المتهم بدفع غرامة مالية وتعويض المجني عليه عن الأضرار. تلا ذلك استئناف المتهم للحكم أمام محكمة النقض خلال المهلة القانونية المحددة. أفاد المدعي بأنه دفع مبلغاً وقدره 5 مليون ليرة سورية للمتهم الثاني على سبيل الأمانة. اتهم المدعى عليه بجرم الاحتيال والنصب على عدة أشخاص بطريقة ممنهجة.\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/legal/summarize",
@@ -94,7 +99,40 @@
                 "summarize"
               ]
             },
-            "description": "Extractive summary + regex-extracted fields. Fast, no neural models, no API key. Text must be at least 10 characters."
+            "description": "التلخيص الاستخلاصي (TextRank + MMR + ترجيح عبارات قانونية) + استخراج حقول بالـ regex.\nسريع، بدون نموذج لغوي، بدون مفتاح API. 'text' لازم 10 محارف على الأقل.\n\n⚠️ شكل 'summary' يتغيّر حسب طول النص، وهاد فرق حقيقي عن نسخة سابقة من الميزة:\n  - نص أطول من 7 جمل → summary مضغوط على شكل نقاط: كل جملة بسطر يبدأ بـ \"- \".\n    هالطلب هون مثال على هالحالة.\n  - نص 7 جمل أو أقل → summary نص متواصل بلا ضغط ولا نقاط (شوفي الطلب التاني بهالمجلد).\nلو الواجهة الأمامية عم تعرض summary كفقرة واحدة، لازم تتعامل مع \"\\n- \" كفاصل نقاط\nلا كنص عادي، وإلا رح تظهر الشرطات والأسطر الجديدة حرفياً بالواجهة.\n\nالحقول ضمن extracted_fields: date (تعرف الآن التاريخ المرتبط بالوقائع تحديداً، لا أي\nتاريخ بالنص) · accused · victim · action · evidence · confession_status (يميّز الآن\nبين عدة متهمين بنفس النص) · ruling.\n\nملاحظة للتطوير: services/summarization.py فيه أيضاً IntelligentLegalPipeline قادر\nيستخرج facts_triples (عبر Stanza) وentities (أشخاص/أماكن/مبالغ/تهم عبر HF NER +\nregex) لو انفعّل enable_ai=True — لكن هالمسار حالياً لا يبني الـ pipeline بهيك\nولا يعيد هالحقلين بالاستجابة حتى لو انفعّلوا، فما توقعيهم بالرد."
+          }
+        },
+        {
+          "name": "POST /api/legal/summarize — نص قصير (summary متواصل)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"بتاريخ 20/05/2023 اعترف المتهم أمام النيابة العامة بارتكاب جرم السرقة. تم ضبط الأدوات المستخدمة في الجريمة وشهد صاحب المحل على الواقعة. قررت المحكمة توقيف المتهم لمدة ستة أشهر.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/summarize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "summarize"
+              ]
+            },
+            "description": "نفس المسار، بنص قصير (3 جمل) لتوضيح الحالة الثانية: النص ≤ 7 جمل فما\nبينضغط، وsummary بيرجع نص متواصل عادي بلا نقاط (\"- \") ولا أسطر جديدة — على عكس\nالطلب الأول بهالمجلد. قارني شكل الحقلين لتبنّي منطق العرض الصحيح بالواجهة الأمامية."
           }
         }
       ]
@@ -269,7 +307,7 @@
                 }
               ]
             },
-            "description": "Every article of one law with all its info, grouped into that law's internal كتاب/باب/فصل categories. Set the law_id collection variable from the /laws response — it contains Arabic and spaces, so URL-encode it. Accepts the law_id, the full law_name, or the short_name."
+            "description": "Every article of one law with all its info, grouped into that law's internal كتاب/باب/فصل categories. Set the law_id collection variable from the /laws response — it contains Arabic and spaces, so URL-encode it. Accepts the law_id, the full law_name, or the short_name. Each article now also includes 'body_links': character-offset spans into 'body' marking reference phrases, each with a 'targets' list (article_id/article_number/law_id) to build clickable in-text links."
           }
         },
         {
@@ -318,7 +356,87 @@
                 "{{article_id}}"
               ]
             },
-            "description": "One article by its full composite id. Use it to resolve entries in another article's 'dependencies' list into a linked-article view."
+            "description": "One article by its full composite id. Use it to resolve entries in another article's 'dependencies' list into a linked-article view. Includes 'body_links': character-offset spans into 'body' marking reference phrases, each with a 'targets' list (article_id/article_number/law_id) to build clickable in-text links."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4b. Cases catalog (browse)",
+      "item": [
+        {
+          "name": "GET /api/legal/cases — all cases",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/cases",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "cases"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "نشل",
+                  "disabled": true,
+                  "description": "Search case number, crimes or text preview"
+                },
+                {
+                  "key": "crime",
+                  "value": "النشل",
+                  "disabled": true,
+                  "description": "Filter by crime/category (see 'categories' in the response)"
+                },
+                {
+                  "key": "year",
+                  "value": "2022",
+                  "disabled": true,
+                  "description": "Filter by decision_year"
+                },
+                {
+                  "key": "outcome",
+                  "value": "إدانة",
+                  "disabled": true,
+                  "description": "Filter by outcome"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "disabled": true,
+                  "description": "Omit to get every case"
+                }
+              ]
+            },
+            "description": "Summary of every case (302) with pagination and filters. Reads standard_cases.json only — no models, no FAISS, instant. Returns a 'categories' roll-up (crimes with counts) plus 'available_years' and 'available_outcomes' you can use to build a browse/filter UI, the same way /laws does for law categories."
+          }
+        },
+        {
+          "name": "GET /api/legal/cases/:case_uid — one case",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/legal/cases/{{case_uid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "legal",
+                "cases",
+                "{{case_uid}}"
+              ],
+              "query": []
+            },
+            "description": "One case with every section (facts, claims, reasoning, judgment, etc). Set the case_uid collection variable from the /cases response (its 'case_uid' field, i.e. file_name). Also accepts a bare case_number as fallback."
           }
         }
       ]
