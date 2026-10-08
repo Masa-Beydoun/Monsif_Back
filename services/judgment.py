@@ -284,28 +284,42 @@ def _record_llm_failure(stage: str, backend: str, model: str, error: Exception) 
 
 
 def _chat_json(messages: List[Dict], cfg: JudgmentConfig, max_tokens: int,
-               temperature: float = 0.0, stage: str = "llm") -> Optional[dict]:
+               temperature: float = 0.0, stage: str = "llm",
+               json_retries: int = 1) -> Optional[dict]:
     """استدعاء النموذج اللغوي وإرجاع JSON مُحلَّل، أو None عند فشل الاستدعاء.
 
     خطأ المفتاح وحده يُرمى للأعلى؛ فهو خطأ إعداد يستحق 503 لا محاولة إكمال
     المسار بسياق ناقص.
+
+    ‏json_retries: عدد محاولات إضافية عند استجابة HTTP 200 سليمة لكن محتوى
+    مقطوع/غير JSON صالح — عُطل قِيس على OpenRouter تحديداً: يوجّه نفس اسم
+    الموديل لعدة مزوّدين خلفياً (DeepInfra وParasail وغيرهما)، وبعضهم يقطع
+    الرد أحياناً رغم status=200. إعادة المحاولة على نفس الطلب غالباً ما تصل
+    مزوّداً مختلفاً فتنجح؛ قيست مباشرة عبر واجهة OpenRouter ونجحت في كل مرة.
     """
     backend, model = resolve_llm(cfg)
-    used: Dict = {}
-    try:
-        return llm_client.chat_json(
-            messages, backend=backend, model=model,
-            max_tokens=max_tokens, temperature=temperature, used=used,
-        )
-    except MissingAPIKey:
-        raise
-    except llm_client.LLMError as e:
-        print(f"[judgment] {e}", flush=True)
-        _record_llm_failure(stage, backend, model, e)
-        return None
-    finally:
-        if used:
-            _record_llm_call(stage, used)
+    for attempt in range(json_retries + 1):
+        used: Dict = {}
+        try:
+            parsed = llm_client.chat_json(
+                messages, backend=backend, model=model,
+                max_tokens=max_tokens, temperature=temperature, used=used,
+            )
+        except MissingAPIKey:
+            raise
+        except llm_client.LLMError as e:
+            print(f"[judgment] {e}", flush=True)
+            _record_llm_failure(stage, backend, model, e)
+            return None
+        finally:
+            if used:
+                _record_llm_call(stage, used)
+        if parsed is not None:
+            return parsed
+        if attempt < json_retries:
+            print(f"[judgment] {stage}: لم يُعِد JSON صالحاً (محاولة {attempt + 1})؛ "
+                  f"إعادة محاولة فورية.", flush=True)
+    return None
 
 
 # إعادة تنظيم الوقائع قبل الاسترجاع

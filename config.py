@@ -237,8 +237,15 @@ CONTRACTS_EMBEDDING_MODEL = os.getenv("CONTRACTS_EMBEDDING_MODEL", EMBEDDING_MOD
 CONTRACTS_DEFAULTS = {
     # عدد نماذج العقود في قائمة المرشحين.
     "top_k": _i("CONTRACTS_TOP_K", 5),
-    # عتبة تشابه cosine بين 0.0 و1.0. القيمة 0.0 تعني بلا عتبة.
+    # عتبة تشابه بين 0.0 و1.0 (على درجة الـ reranker بعد التطبيع، لا cosine
+    # الفهرس الخام). القيمة 0.0 تعني بلا عتبة.
     "min_score": _f("CONTRACTS_MIN_SCORE", 0.0),
+    # حجم مجموعة المرشحين المسترجَعة من FAISS قبل إعادة الترتيب بالـ
+    # cross-encoder. تشابه cosine من bi-encoder وحده غير كافٍ للتمييز الدقيق
+    # (قيس: على 211 نموذجاً كل الدرجات تقع بين 0.75 و0.84 بلا صلة بالموضوع
+    # الفعلي، فيظهر نموذج غير ذي صلة أولاً)، تماماً كما في laws_rag وcases_rag.
+    "rerank_pool": _i("CONTRACTS_RERANK_POOL", 30),
+    "rerank_max_length": _i("CONTRACTS_RERANK_MAX_LENGTH", 512),
     # طبقة النموذج اللغوي التي تقترح الأنسب من المرشحين؛ تستهلك استدعاءً واحداً.
     # القيمة false تعني بحثاً دلالياً صرفاً بلا أي استدعاء.
     "suggest": _b("CONTRACTS_SUGGEST", True),

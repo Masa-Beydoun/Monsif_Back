@@ -222,13 +222,19 @@ class ContractsRAG:
     # البحث
 
     def search(self, query_text: str, **kw) -> List[Dict]:
-        """قائمة نماذج العقود المرشحة للاستعلام."""
+        """قائمة نماذج العقود المرشحة للاستعلام: استرجاع FAISS ثم إعادة ترتيب
+        بالـ cross-encoder — بلا هذه الخطوة الثانية تشابه cosine من bi-encoder
+        وحده لا يميّز بدقة كافية (قيس: 211 نموذجاً كلها بين 0.75 و0.84 بلا صلة
+        فعلية بالموضوع)، فيظهر نموذج غير ذي صلة أولاً كما في cases_rag/laws_rag
+        بالضبط قبل أن يُضاف لهما الـ reranker.
+        """
         if not self._ready:
             raise RuntimeError("فهرس العقود غير محمّل.")
 
         p = dict(config.CONTRACTS_DEFAULTS)
         p.update({k: v for k, v in kw.items() if v is not None})
         top_k = max(1, min(int(p["top_k"]), len(self.records)))
+        pool_size = max(top_k, min(int(p["rerank_pool"]), len(self.records)))
 
         model = _get_encoder()
         text = query_text
@@ -236,15 +242,22 @@ class ContractsRAG:
             text = "query: " + text
         q_vec = model.encode([text], normalize_embeddings=True).astype(np.float32)
 
-        scores, indices = self.index.search(q_vec, top_k)
+        _, indices = self.index.search(q_vec, pool_size)
+        candidates = [self.records[int(idx)] for idx in indices[0] if idx >= 0]
+        if not candidates:
+            return []
+
+        reranker = model_registry.get_reranker()
+        pairs = [[query_text, rec["search_text"]] for rec in candidates]
+        rerank_scores = reranker.compute_score(
+            pairs, normalize=True, max_length=p["rerank_max_length"])
+
+        ranked = sorted(zip(candidates, rerank_scores), key=lambda x: -x[1])[:top_k]
 
         results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0:
-                continue
+        for rec, score in ranked:
             if float(score) < p["min_score"]:
                 continue
-            rec = self.records[int(idx)]
             results.append(
                 {
                     "doc_id": rec["doc_id"],
