@@ -27,7 +27,7 @@ def fetch(repo_id: str, retries: int, wait: int) -> bool:
             path = snapshot_download(
                 repo_id=repo_id,
                 # ملفات غير مستخدمة (أوزان TF/Flax/ONNX)؛ استبعادها يوفّر مساحة كبيرة.
-                ignore_patterns=["*.h5", "*.msgpack", "*.ot"],
+                ignore_patterns=["*.h5", "*.msgpack", "*.ot", "onnx/*", "imgs/*"],
                 max_workers=4,
             )
             print(f"  تم: {path}", flush=True)
@@ -37,8 +37,10 @@ def fetch(repo_id: str, retries: int, wait: int) -> bool:
         except Exception as e:
             print(f"  انقطع: {type(e).__name__}: {str(e)[:140]}", flush=True)
             if attempt < retries:
-                print(f"    إعادة المحاولة بعد {wait}s (يُستأنف من موضع الانقطاع) ...",
-                      flush=True)
+                print(
+                    f"    إعادة المحاولة بعد {wait}s (يُستأنف من موضع الانقطاع) ...",
+                    flush=True,
+                )
                 time.sleep(wait)
     return False
 
